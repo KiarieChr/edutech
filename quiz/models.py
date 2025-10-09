@@ -1,3 +1,6 @@
+from modeltranslation.manager import MultilingualManager
+from model_utils.managers import InheritanceManager
+
 import json
 import re
 
@@ -368,6 +371,18 @@ class Sitting(models.Model):
         total = self.get_max_score
         return answered, total
 
+class MultilingualInheritanceManager(InheritanceManager, MultilingualManager):
+    """
+    Custom manager that combines InheritanceManager and MultilingualManager.
+    This is necessary because Question model uses inheritance and translation.
+    """
+    use_for_related_fields = True
+    
+    def get_queryset(self):
+        # Call both parent get_queryset methods
+        qs = InheritanceManager.get_queryset(self)
+        return qs
+
 
 class Question(models.Model):
     quiz = models.ManyToManyField(Quiz, verbose_name=_("Quiz"), blank=True)
@@ -389,7 +404,10 @@ class Question(models.Model):
         verbose_name=_("Explanation"),
     )
 
-    objects = InheritanceManager()
+    # Replace this line:
+    # objects = InheritanceManager()
+    # With this:
+    objects = MultilingualInheritanceManager()
 
     class Meta:
         verbose_name = _("Question")
@@ -397,7 +415,6 @@ class Question(models.Model):
 
     def __str__(self):
         return self.content
-
 
 class MCQuestion(Question):
     choice_order = models.CharField(

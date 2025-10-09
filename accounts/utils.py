@@ -1,26 +1,30 @@
 import threading
+import secrets
+import string
 from datetime import datetime
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from core.utils import send_html_email
 
 
-def generate_password():
-    return get_user_model().objects.make_random_password()
+def generate_password(length=12):
+    """Generate a secure random password"""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
 def generate_student_id():
     # Generate a username based on first and last name and registration date
     registered_year = datetime.now().strftime("%Y")
     students_count = get_user_model().objects.filter(is_student=True).count()
-    return f"{settings.STUDENT_ID_PREFIX}-{registered_year}-{students_count}"
+    return f"{settings.STUDENT_ID_PREFIX}-{registered_year}-{students_count + 1}"
 
 
 def generate_lecturer_id():
     # Generate a username based on first and last name and registration date
     registered_year = datetime.now().strftime("%Y")
     lecturers_count = get_user_model().objects.filter(is_lecturer=True).count()
-    return f"{settings.LECTURER_ID_PREFIX}-{registered_year}-{lecturers_count}"
+    return f"{settings.LECTURER_ID_PREFIX}-{registered_year}-{lecturers_count + 1}"
 
 
 def generate_student_credentials():
@@ -54,7 +58,7 @@ def send_new_account_email(user, password):
     else:
         template_name = "accounts/email/new_lecturer_account_confirmation.html"
     email = {
-        "subject": "Your SkyLearn account confirmation and credentials",
+        "subject": "Account Created Successfully",
         "recipient_list": [user.email],
         "template_name": template_name,
         "context": {"user": user, "password": password},
