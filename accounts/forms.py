@@ -2,11 +2,165 @@ from django import forms
 from django.db import transaction
 from django.contrib.auth.forms import (
     UserCreationForm,
-    UserChangeForm,
+    UserChangeForm,AuthenticationForm, PasswordChangeForm,PasswordResetForm
 )
-from django.contrib.auth.forms import PasswordResetForm
 from course.models import Program
 from .models import User, Student, Parent, RELATION_SHIP, LEVEL, GENDERS
+from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
+from accounts.models import User
+
+
+class CustomAuthenticationForm(AuthenticationForm):
+    """
+    Custom login form that handles first-time login detection.
+    Does NOT log in users with is_first_login=True.
+    """
+    username = forms.CharField(
+        max_length=254,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control form-control-lg form-input',
+            'placeholder': _('Enter your User ID'),
+            'autofocus': True
+        })
+    )
+    password = forms.CharField(
+        label=_("Password"),
+        strip=False,
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control form-control-lg form-input',
+            'placeholder': _('Enter your password'),
+        }),
+    )
+
+    error_messages = {
+        'invalid_login': _(
+            "Please enter a correct username and password. "
+            "Note that both fields may be case-sensitive."
+        ),
+        'inactive': _("This account is inactive."),
+        'first_time_login': _("First time login detected. Please complete your profile setup."),
+    }
+
+    def confirm_login_allowed(self, user):
+        """
+        Override to check if user is active.
+        We do NOT check is_first_login here - handled in view.
+        """
+        if not user.is_active:
+            raise ValidationError(
+                self.error_messages['inactive'],
+                code='inactive',
+            )
+
+
+class FirstTimeSetupForm(forms.Form):
+    """
+    Form for first-time users to set their username and password.
+    """
+    username = forms.CharField(
+        max_length=150,
+        label=_("New Username"),
+        help_text=_("Letters, digits and @/./+/-/_ only."),
+        widget=forms.TextInput(attrs={
+            'class': 'form-control form-control-lg form-input',
+            'placeholder': _('Choose a username'),
+            'autofocus': True
+        })
+    )
+    
+    new_password1 = forms.CharField(
+        label=_("New Password"),
+        strip=False,
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control form-control-lg form-input',
+            'placeholder': _('Create a strong password'),
+            'autocomplete': 'new-password'
+        }),
+        help_text=_(
+            "Your password must contain at least 8 characters and "
+            "cannot be entirely numeric or too common."
+        ),
+    )
+    
+    new_password2 = forms.CharField(
+        label=_("Confirm Password"),
+        strip=False,
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control form-control-lg form-input',
+            'placeholder': _('Re-enter your password'),
+            'autocomplete': 'new-password'
+        }),
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        """
+        Initialize form with current user instance.
+        """
+        self.user = user
+        super().__init__(*args, **kwargs)
+        # Pre-populate username field with current username
+        if user:
+            self.fields['username'].initial = user.username
+
+    def clean_username(self):
+        """
+        Validate that the username is unique (excluding current user).
+        """
+        username = self.cleaned_data.get('username')
+        
+        if User.objects.filter(username=username).exclude(pk=self.user.pk).exists():
+            raise ValidationError(
+                _("This username is already taken. Please choose another."),
+                code='duplicate_username'
+            )
+        
+        return username
+
+    def clean_new_password1(self):
+        """
+        Validate password using Django's password validators.
+        """
+        password = self.cleaned_data.get('new_password1')
+        
+        # Run all configured password validators
+        validate_password(password, self.user)
+        
+        return password
+
+    def clean(self):
+        """
+        Verify that passwords match.
+        """
+        cleaned_data = super().clean()
+        password1 = cleaned_data.get('new_password1')
+        password2 = cleaned_data.get('new_password2')
+
+        if password1 and password2 and password1 != password2:
+            raise ValidationError(
+                _("The two password fields didn't match."),
+                code='password_mismatch'
+            )
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        """
+        Save the new username and password, and mark first login as complete.
+        """
+        username = self.cleaned_data['username']
+        password = self.cleaned_data['new_password1']
+        
+        self.user.username = username
+        self.user.set_password(password)
+        self.user.is_first_login = False  # Mark setup as complete
+        
+        if commit:
+            self.user.save()
+        
+        return self.user
 
 
 class StaffAddForm(UserCreationForm):

@@ -15,7 +15,7 @@ from .models import NewsAndEvents, ActivityLog, Session, Semester
 def home_view(request):
     items = NewsAndEvents.objects.all().order_by("-updated_date")
     context = {
-        "title": "News & Events",
+        "title": "Home",
         "items": items,
     }
     return render(request, "core/index.html", context)

@@ -1,13 +1,6 @@
 from django.urls import path, include
+from django.contrib.auth import views as auth_views
 
-# from django.contrib.auth.views import (
-#     PasswordResetView,
-#     PasswordResetDoneView,
-#     PasswordResetConfirmView,
-#     PasswordResetCompleteView,
-#     LoginView,
-#     LogoutView,
-# )
 from .views import (
     profile,
     profile_single,
@@ -27,7 +20,8 @@ from .views import (
     validate_username,
     register,
     render_lecturer_pdf_list,  # new
-    render_student_pdf_list,  # new
+    render_student_pdf_list,
+    CustomLoginView, FirstTimeSetupView,users_dashboard,users_list_ajax, user_quick_actions_ajax
 )
 
 # from .forms import EmailValidationOnForgotPassword
@@ -62,31 +56,29 @@ urlpatterns = [
     ),  # new
     path(
         "create_students_pdf_list/", render_student_pdf_list, name="student_list_pdf"
-    ),  # new
-    # path('add-student/', StudentAddView.as_view(), name='add_student'),
-    # path('programs/course/delete/<int:pk>/', course_delete, name='delete_course'),
-    # Setting urls
-    # path('profile/<int:pk>/edit/', profileUpdateView, name='edit_profile'),
-    # path('profile/<int:pk>/change-password/', changePasswordView, name='change_password'),
-    # ################################################################
-    # path('login/', LoginView.as_view(), name='login'),
-    # path('logout/', LogoutView.as_view(), name='logout', kwargs={'next_page': '/'}),
-    # path('password-reset/', PasswordResetView.as_view(
-    #     form_class=EmailValidationOnForgotPassword,
-    #     template_name='registration/password_reset.html'
-    # ),
-    #      name='password_reset'),
-    # path('password-reset/done/', PasswordResetDoneView.as_view(
-    #     template_name='registration/password_reset_done.html'
-    # ),
-    #      name='password_reset_done'),
-    # path('password-reset-confirm/<uidb64>/<token>/', PasswordResetConfirmView.as_view(
-    #     template_name='registration/password_reset_confirm.html'
-    # ),
-    #      name='password_reset_confirm'),
-    # path('password-reset-complete/', PasswordResetCompleteView.as_view(
-    #     template_name='registration/password_reset_complete.html'
-    # ),
-    #      name='password_reset_complete')
-    # ################################################################
+    ), 
+    path('auth/login/', CustomLoginView.as_view(), name='login'),
+
+    # First-time login setup
+    path('first-time-setup/', FirstTimeSetupView.as_view(), name='first_time_setup'),
+
+    # Logout
+    path('auth/logout/', auth_views.LogoutView.as_view(next_page='login'), name='logout'),
+
+    # Password reset
+    path('auth/password-reset/', auth_views.PasswordResetView.as_view(), name='password_reset'),
+    path('auth/password-reset/done/', auth_views.PasswordResetDoneView.as_view(), name='password_reset_done'),
+    path(
+        'auth/password-reset-confirm/<uidb64>/<token>/',
+        auth_views.PasswordResetConfirmView.as_view(),
+        name='password_reset_confirm'
+    ),
+    path(
+        'auth/password-reset-complete/',
+        auth_views.PasswordResetCompleteView.as_view(),
+        name='password_reset_complete'
+    ),
+    path('users-dashboard/', users_dashboard, name='users_dashboard'),
+    path('ajax/users-list/', users_list_ajax, name='users_list_ajax'),
+    path('ajax/user/<int:user_id>/actions/', user_quick_actions_ajax, name='user_quick_actions'),
 ]

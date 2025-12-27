@@ -1,0 +1,603 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load i18n %}
+
+{% block title %}{% trans 'Users Dashboard' %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  
+  <!-- Page Header -->
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h2 class="mb-1"><i class="fas fa-users me-2"></i>{% trans 'Users Dashboard' %}</h2>
+      <p class="text-muted mb-0">{% trans 'Manage and monitor all system users' %}</p>
+    </div>
+    <button class="btn btn-primary" onclick="refreshUsers()">
+      <i class="fas fa-sync-alt me-2"></i>{% trans 'Refresh' %}
+    </button>
+  </div>
+
+  <!-- Statistics Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-lg-4 col-xl-2">
+      <div class="card stat-card border-start border-primary border-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                <i class="fas fa-users"></i>
+              </div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="stat-value">{{ stats.total_users }}</div>
+              <div class="stat-label">{% trans 'Total Users' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4 col-xl-2">
+      <div class="card stat-card border-start border-success border-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <div class="stat-icon bg-success bg-opacity-10 text-success">
+                <i class="fas fa-user-graduate"></i>
+              </div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="stat-value">{{ stats.students }}</div>
+              <div class="stat-label">{% trans 'Students' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4 col-xl-2">
+      <div class="card stat-card border-start border-info border-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <div class="stat-icon bg-info bg-opacity-10 text-info">
+                <i class="fas fa-chalkboard-teacher"></i>
+              </div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="stat-value">{{ stats.lecturers }}</div>
+              <div class="stat-label">{% trans 'Lecturers' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4 col-xl-2">
+      <div class="card stat-card border-start border-warning border-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+                <i class="fas fa-shield-alt"></i>
+              </div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="stat-value">{{ stats.admins }}</div>
+              <div class="stat-label">{% trans 'Admins' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4 col-xl-2">
+      <div class="card stat-card border-start border-success border-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <div class="stat-icon bg-success bg-opacity-10 text-success">
+                <i class="fas fa-check-circle"></i>
+              </div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="stat-value">{{ stats.active_users }}</div>
+              <div class="stat-label">{% trans 'Active' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6 col-lg-4 col-xl-2">
+      <div class="card stat-card border-start border-danger border-4">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div class="flex-shrink-0">
+              <div class="stat-icon bg-danger bg-opacity-10 text-danger">
+                <i class="fas fa-user-clock"></i>
+              </div>
+            </div>
+            <div class="flex-grow-1 ms-3">
+              <div class="stat-value">{{ stats.first_login_pending }}</div>
+              <div class="stat-label">{% trans 'Pending' %}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters Card -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <form id="filters-form">
+        <div class="row g-3">
+          
+          <!-- Search -->
+          <div class="col-md-4">
+            <label for="search-input" class="form-label">
+              <i class="fas fa-search me-1"></i>{% trans 'Search' %}
+            </label>
+            <input 
+              type="text" 
+              class="form-control" 
+              id="search-input" 
+              name="search"
+              placeholder="{% trans 'Search by name, email, username...' %}">
+          </div>
+
+          <!-- Role Filter -->
+          <div class="col-md-2">
+            <label for="role-filter" class="form-label">
+              <i class="fas fa-user-tag me-1"></i>{% trans 'Role' %}
+            </label>
+            <select class="form-select" id="role-filter" name="role">
+              <option value="">{% trans 'All Roles' %}</option>
+              <option value="student">{% trans 'Students' %}</option>
+              <option value="lecturer">{% trans 'Lecturers' %}</option>
+              <option value="admin">{% trans 'Admins' %}</option>
+            </select>
+          </div>
+
+          <!-- Status Filter -->
+          <div class="col-md-2">
+            <label for="status-filter" class="form-label">
+              <i class="fas fa-toggle-on me-1"></i>{% trans 'Status' %}
+            </label>
+            <select class="form-select" id="status-filter" name="status">
+              <option value="">{% trans 'All Status' %}</option>
+              <option value="active">{% trans 'Active' %}</option>
+              <option value="inactive">{% trans 'Inactive' %}</option>
+            </select>
+          </div>
+
+          <!-- First Login Filter -->
+          <div class="col-md-2">
+            <label for="first-login-filter" class="form-label">
+              <i class="fas fa-user-clock me-1"></i>{% trans 'Setup' %}
+            </label>
+            <select class="form-select" id="first-login-filter" name="first_login">
+              <option value="">{% trans 'All' %}</option>
+              <option value="pending">{% trans 'Pending' %}</option>
+              <option value="completed">{% trans 'Completed' %}</option>
+            </select>
+          </div>
+
+          <!-- Clear Button -->
+          <div class="col-md-2">
+            <label class="form-label">&nbsp;</label>
+            <button type="button" class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+              <i class="fas fa-times me-1"></i>{% trans 'Clear' %}
+            </button>
+          </div>
+
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Users Table Card -->
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0"><i class="fas fa-list me-2"></i>{% trans 'Users List' %}</h5>
+      <select class="form-select form-select-sm" id="per-page-select" style="width: auto;">
+        <option value="10">10 {% trans 'per page' %}</option>
+        <option value="25">25 {% trans 'per page' %}</option>
+        <option value="50">50 {% trans 'per page' %}</option>
+        <option value="100">100 {% trans 'per page' %}</option>
+      </select>
+    </div>
+    
+    <div class="card-body position-relative">
+      
+      <!-- Loading Overlay -->
+      <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">{% trans 'Loading...' %}</span>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>{% trans 'User' %}</th>
+              <th>{% trans 'Role' %}</th>
+              <th>{% trans 'Status' %}</th>
+              <th>{% trans 'Setup' %}</th>
+              <th>{% trans 'Last Login' %}</th>
+              <th>{% trans 'Joined' %}</th>
+              <th class="text-end">{% trans 'Actions' %}</th>
+            </tr>
+          </thead>
+          <tbody id="users-table-body">
+            <!-- Data will be loaded via AJAX -->
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="card-footer">
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="text-muted small" id="pagination-info">
+          <!-- Pagination info will be updated via AJAX -->
+        </div>
+        <nav>
+          <ul class="pagination pagination-sm mb-0" id="pagination-controls">
+            <!-- Pagination controls will be updated via AJAX -->
+          </ul>
+        </nav>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock content %}
+
+{% block js %}
+<script>
+  let currentPage = 1;
+  let currentFilters = {};
+
+  // Load users on page load
+  $(document).ready(function() {
+    loadUsers();
+
+    // Trigger search on input with debounce
+    let searchTimeout;
+    $('#search-input').on('input', function() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        currentPage = 1;
+        loadUsers();
+      }, 500);
+    });
+
+    // Trigger load on filter change
+    $('#role-filter, #status-filter, #first-login-filter, #per-page-select').on('change', function() {
+      currentPage = 1;
+      loadUsers();
+    });
+  });
+
+  // Load users function
+  function loadUsers(page = 1) {
+    currentPage = page;
+    
+    // Show loading overlay
+    $('#loading-overlay').addClass('active').css('display', 'flex');
+
+    // Get filter values
+    const filters = {
+      search: $('#search-input').val(),
+      role: $('#role-filter').val(),
+      status: $('#status-filter').val(),
+      first_login: $('#first-login-filter').val(),
+      page: currentPage,
+      per_page: $('#per-page-select').val()
+    };
+
+    currentFilters = filters;
+
+    // AJAX request
+    $.ajax({
+      url: "{% url 'users_list_ajax' %}",
+      type: 'GET',
+      data: filters,
+      success: function(response) {
+        renderUsersTable(response);
+        renderPagination(response.pagination);
+        $('#loading-overlay').removeClass('active').css('display', 'none');
+      },
+      error: function(xhr, status, error) {
+        console.error('Error loading users:', error);
+        $('#loading-overlay').removeClass('active').css('display', 'none');
+        showError();
+      }
+    });
+  }
+
+  // Render users table
+  function renderUsersTable(response) {
+    const tbody = $('#users-table-body');
+    tbody.empty();
+
+    if (response.users.length === 0) {
+      tbody.html(`
+        <tr>
+          <td colspan="7" class="text-center py-5">
+            <i class="fas fa-users-slash fa-3x text-muted mb-3"></i>
+            <h5>{% trans 'No Users Found' %}</h5>
+            <p class="text-muted">{% trans 'Try adjusting your filters.' %}</p>
+          </td>
+        </tr>
+      `);
+      return;
+    }
+
+    response.users.forEach(user => {
+      const statusBadge = user.is_active 
+        ? '<span class="badge bg-success">Active</span>' 
+        : '<span class="badge bg-danger">Inactive</span>';
+      
+      const setupBadge = user.is_first_login 
+        ? '<span class="badge bg-warning">Pending</span>' 
+        : '<span class="badge bg-success">Completed</span>';
+      
+      let roleBadge = '';
+      if (user.role === 'Admin') {
+        roleBadge = '<span class="badge bg-warning text-dark">Admin</span>';
+      } else if (user.role === 'Lecturer') {
+        roleBadge = '<span class="badge bg-info">Lecturer</span>';
+      } else if (user.role === 'Student') {
+        roleBadge = '<span class="badge bg-primary">Student</span>';
+      }
+
+      const row = `
+        <tr data-user-id="${user.id}">
+          <td>
+            <div class="d-flex align-items-center">
+              <img src="${user.picture_url}" alt="${user.full_name}" 
+                   class="rounded-circle me-2" width="40" height="40" style="object-fit: cover;">
+              <div>
+                <div class="fw-semibold">${user.full_name}</div>
+                <small class="text-muted">${user.email}</small>
+              </div>
+            </div>
+          </td>
+          <td>${roleBadge}</td>
+          <td>${statusBadge}</td>
+          <td>${setupBadge}</td>
+          <td><small class="text-muted">${user.last_login}</small></td>
+          <td><small class="text-muted">${user.date_joined}</small></td>
+          <td class="text-end">
+            <div class="btn-group btn-group-sm">
+              <a href="${user.profile_url}" class="btn btn-outline-primary" title="{% trans 'View Profile' %}">
+                <i class="fas fa-eye"></i>
+              </a>
+              <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" 
+                      data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="visually-hidden">{% trans 'Toggle Actions' %}</span>
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                  <a class="dropdown-item" href="${user.profile_url}">
+                    <i class="fas fa-user me-2"></i>{% trans 'View Profile' %}
+                  </a>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <a class="dropdown-item" href="#" onclick="toggleUserStatus(${user.id}, ${user.is_active}); return false;">
+                    <i class="fas fa-toggle-${user.is_active ? 'off' : 'on'} me-2"></i>
+                    ${user.is_active ? '{% trans "Deactivate" %}' : '{% trans "Activate" %}'}
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="#" onclick="resetFirstLogin(${user.id}); return false;">
+                    <i class="fas fa-redo me-2"></i>{% trans 'Reset Setup' %}
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </td>
+        </tr>
+      `;
+      
+      tbody.append(row);
+    });
+  }
+
+  // Render pagination
+  function renderPagination(pagination) {
+    // Update info
+    const start = ((pagination.current_page - 1) * pagination.per_page) + 1;
+    const end = Math.min(pagination.current_page * pagination.per_page, pagination.total_count);
+    
+    $('#pagination-info').html(
+      `{% trans 'Showing' %} ${start} {% trans 'to' %} ${end} {% trans 'of' %} ${pagination.total_count} {% trans 'users' %}`
+    );
+
+    // Update controls
+    const controls = $('#pagination-controls');
+    controls.empty();
+
+    // Previous button
+    controls.append(`
+      <li class="page-item ${!pagination.has_previous ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="loadUsers(${pagination.current_page - 1}); return false;">
+          <i class="fas fa-chevron-left"></i>
+        </a>
+      </li>
+    `);
+
+    // Page numbers
+    const maxPages = 5;
+    let startPage = Math.max(1, pagination.current_page - Math.floor(maxPages / 2));
+    let endPage = Math.min(pagination.total_pages, startPage + maxPages - 1);
+    
+    if (endPage - startPage < maxPages - 1) {
+      startPage = Math.max(1, endPage - maxPages + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      controls.append(`
+        <li class="page-item ${i === pagination.current_page ? 'active' : ''}">
+          <a class="page-link" href="#" onclick="loadUsers(${i}); return false;">${i}</a>
+        </li>
+      `);
+    }
+
+    // Next button
+    controls.append(`
+      <li class="page-item ${!pagination.has_next ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="loadUsers(${pagination.current_page + 1}); return false;">
+          <i class="fas fa-chevron-right"></i>
+        </a>
+      </li>
+    `);
+  }
+
+  // Show error
+  function showError() {
+    $('#users-table-body').html(`
+      <tr>
+        <td colspan="7" class="text-center text-danger py-5">
+          <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+          <p>{% trans 'Error loading users. Please try again.' %}</p>
+          <button class="btn btn-primary btn-sm" onclick="refreshUsers()">
+            <i class="fas fa-redo me-1"></i>{% trans 'Retry' %}
+          </button>
+        </td>
+      </tr>
+    `);
+  }
+
+  // Refresh users
+  function refreshUsers() {
+    loadUsers(currentPage);
+  }
+
+  // Clear filters
+  function clearFilters() {
+    $('#search-input').val('');
+    $('#role-filter').val('');
+    $('#status-filter').val('');
+    $('#first-login-filter').val('');
+    currentPage = 1;
+    loadUsers();
+  }
+
+  // Toggle user status
+  function toggleUserStatus(userId, currentStatus) {
+    if (!confirm(`{% trans 'Are you sure you want to' %} ${currentStatus ? '{% trans "deactivate" %}' : '{% trans "activate" %}'} {% trans 'this user?' %}`)) {
+      return;
+    }
+
+    $.ajax({
+      url: `/accounts/ajax/user/${userId}/actions/`,
+      type: 'POST',
+      data: {
+        action: 'toggle_active',
+        csrfmiddlewaretoken: '{{ csrf_token }}'
+      },
+      success: function(response) {
+        if (response.success) {
+          alert(response.message);
+          loadUsers(currentPage);
+        }
+      },
+      error: function() {
+        alert('{% trans "Error performing action" %}');
+      }
+    });
+  }
+
+  // Reset first login
+  function resetFirstLogin(userId) {
+    if (!confirm('{% trans "This will require the user to complete first-time setup on next login. Continue?" %}')) {
+      return;
+    }
+
+    $.ajax({
+      url: `/accounts/ajax/user/${userId}/actions/`,
+      type: 'POST',
+      data: {
+        action: 'reset_first_login',
+        csrfmiddlewaretoken: '{{ csrf_token }}'
+      },
+      success: function(response) {
+        if (response.success) {
+          alert(response.message);
+          loadUsers(currentPage);
+        }
+      },
+      error: function() {
+        alert('{% trans "Error performing action" %}');
+      }
+    });
+  }
+</script>
+
+<style>
+  .stat-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+
+  .stat-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+  }
+
+  .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--fa-text-primary);
+    line-height: 1;
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: var(--fa-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 0.25rem;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  .loading-overlay.active {
+    display: flex !important;
+  }
+
+  .table-hover tbody tr:hover {
+    background-color: rgba(63, 60, 141, 0.05);
+  }
+</style>
+{% endblock %}

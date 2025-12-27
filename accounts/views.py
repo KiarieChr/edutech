@@ -1,15 +1,24 @@
 from django.contrib import messages
-from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import update_session_auth_hash,login, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import get_template, render_to_string
 from django.utils.decorators import method_decorator
-from django.views.generic import CreateView
+from django.views.generic import CreateView,FormView
 from django_filters.views import FilterView
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.views import LoginView as DjangoLoginView
+from django.urls import reverse_lazy, reverse
+from django.views import View
+from django.utils.translation import gettext_lazy as _
 from xhtml2pdf import pisa
 
+from django.core.paginator import Paginator
+from django.db.models import Q, Count
+from accounts.forms import CustomAuthenticationForm, FirstTimeSetupForm
+from accounts.models import User
 from accounts.decorators import admin_required
 from accounts.filters import LecturerFilter, StudentFilter
 from accounts.forms import (
@@ -23,6 +32,323 @@ from accounts.models import Parent, Student, User
 from core.models import Semester, Session
 from course.models import Course
 from result.models import TakenCourse
+
+class CustomLoginView(DjangoLoginView):
+    """
+    Custom login view that checks for first-time login.
+    
+    Flow:
+    1. User submits credentials
+    2. If auth fails → show error
+    3. If auth succeeds and is_first_login=True → redirect to setup
+    4. If auth succeeds and is_first_login=False → login normally
+    """
+    form_class = CustomAuthenticationForm
+    template_name = 'registration/login.html'
+    redirect_authenticated_user = True
+    
+    def form_valid(self, form):
+        """
+        Override to check for first-time login before logging in.
+        """
+        username = form.cleaned_data.get('username')
+        password = form.cleaned_data.get('password')
+        
+        # Authenticate user
+        user = authenticate(self.request, username=username, password=password)
+        
+        if user is not None:
+            # Check if this is first time login
+            if user.is_first_login:
+                # Store user_id in session for first-time setup
+                self.request.session['first_time_user_id'] = user.id
+                messages.info(
+                    self.request,
+                    _("Welcome! Please complete your profile setup to continue.")
+                )
+                return redirect('first_time_setup')
+            
+            # Normal login for returning users
+            login(self.request, user)
+            messages.success(self.request, _("Welcome back, {}!").format(user.get_full_name))
+            return redirect(self.get_success_url())
+        
+        # This shouldn't happen if form validation passed, but as a safety
+        form.add_error(None, _("Authentication failed."))
+        return self.form_invalid(form)
+    
+    def get_success_url(self):
+        """
+        Redirect to dashboard after successful login.
+        """
+        next_url = self.request.GET.get('next')
+        if next_url:
+            return next_url
+        return reverse('home')  # or 'dashboard'
+
+
+class FirstTimeSetupView(FormView):
+    """
+    View for first-time users to set up their account.
+    
+    Security:
+    - Only accessible after successful authentication
+    - User ID stored in session (not logged in yet)
+    - Cannot be accessed if is_first_login=False
+    """
+    template_name = 'registration/first_time_login.html'
+    form_class = FirstTimeSetupForm
+    success_url = reverse_lazy('home')  # or 'dashboard'
+    
+    def dispatch(self, request, *args, **kwargs):
+        """
+        Check if user is eligible for first-time setup.
+        """
+        # Get user_id from session
+        user_id = request.session.get('first_time_user_id')
+        
+        if not user_id:
+            messages.error(request, _("Invalid access. Please login first."))
+            return redirect('login')
+        
+        # Get user object
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            messages.error(request, _("User not found."))
+            return redirect('login')
+        
+        # Check if user has already completed setup
+        if not user.is_first_login:
+            messages.info(request, _("You have already completed the setup."))
+            return redirect('login')
+        
+        # Store user in instance for later use
+        self.current_user = user
+        
+        return super().dispatch(request, *args, **kwargs)
+    
+    def get_form_kwargs(self):
+        """
+        Pass user instance to form.
+        """
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.current_user
+        return kwargs
+    
+    def get_context_data(self, **kwargs):
+        """
+        Add user info to context for template.
+        """
+        context = super().get_context_data(**kwargs)
+        context['user'] = self.current_user
+        context['title'] = _("Complete Your Profile Setup")
+        return context
+    
+    def form_valid(self, form):
+        """
+        Save new credentials and log user in.
+        """
+        # Save form (updates username, password, and is_first_login)
+        user = form.save()
+        
+        # Clear the session variable
+        if 'first_time_user_id' in self.request.session:
+            del self.request.session['first_time_user_id']
+        
+        # Log the user in
+        login(self.request, user, backend='django.contrib.auth.backends.ModelBackend')
+        
+        messages.success(
+            self.request,
+            _("Your profile has been set up successfully! Welcome to the system.")
+        )
+        
+        return super().form_valid(form)
+    
+    def form_invalid(self, form):
+        """
+        Show error message on form validation failure.
+        """
+        messages.error(
+            self.request,
+            _("Please correct the errors below.")
+        )
+        return super().form_invalid(form)
+
+@login_required
+@admin_required
+def users_dashboard(request):
+    """
+    Main users dashboard view.
+    Displays statistics and user management interface.
+    """
+    # Get user statistics
+    stats = {
+        'total_users': User.objects.count(),
+        'students': User.objects.filter(is_student=True).count(),
+        'lecturers': User.objects.filter(is_lecturer=True).count(),
+        'admins': User.objects.filter(is_superuser=True).count(),
+        'active_users': User.objects.filter(is_active=True).count(),
+        'inactive_users': User.objects.filter(is_active=False).count(),
+        'first_login_pending': User.objects.filter(is_first_login=True).count(),
+    }
+    
+    context = {
+        'title': _('Users Dashboard'),
+        'stats': stats,
+    }
+    
+    return render(request, 'accounts/users_dashboard.html', context)
+
+
+@login_required
+@admin_required
+def users_list_ajax(request):
+    """
+    AJAX endpoint to fetch users list with filtering, search, and pagination.
+    
+    Query Parameters:
+    - search: Search term for username, email, or name
+    - role: Filter by role (student, lecturer, admin)
+    - status: Filter by status (active, inactive)
+    - first_login: Filter by first login status (pending, completed)
+    - page: Page number for pagination
+    - per_page: Items per page (default: 10)
+    """
+    
+    # Get query parameters
+    search = request.GET.get('search', '').strip()
+    role = request.GET.get('role', '')
+    status = request.GET.get('status', '')
+    first_login = request.GET.get('first_login', '')
+    page = request.GET.get('page', 1)
+    per_page = int(request.GET.get('per_page', 10))
+    
+    # Start with all users
+    users = User.objects.all()
+    
+    # Apply search filter
+    if search:
+        users = users.filter(
+            Q(username__icontains=search) |
+            Q(first_name__icontains=search) |
+            Q(last_name__icontains=search) |
+            Q(email__icontains=search)
+        )
+    
+    # Apply role filter
+    if role == 'student':
+        users = users.filter(is_student=True)
+    elif role == 'lecturer':
+        users = users.filter(is_lecturer=True)
+    elif role == 'admin':
+        users = users.filter(is_superuser=True)
+    
+    # Apply status filter
+    if status == 'active':
+        users = users.filter(is_active=True)
+    elif status == 'inactive':
+        users = users.filter(is_active=False)
+    
+    # Apply first login filter
+    if first_login == 'pending':
+        users = users.filter(is_first_login=True)
+    elif first_login == 'completed':
+        users = users.filter(is_first_login=False)
+    
+    # Order by date joined (newest first)
+    users = users.order_by('-date_joined')
+    
+    # Get total count before pagination
+    total_count = users.count()
+    
+    # Paginate
+    paginator = Paginator(users, per_page)
+    try:
+        users_page = paginator.page(page)
+    except:
+        users_page = paginator.page(1)
+    
+    # Prepare user data
+    users_data = []
+    for user in users_page:
+        users_data.append({
+            'id': user.id,
+            'username': user.username,
+            'full_name': user.get_full_name,
+            'email': user.email or 'N/A',
+            'role': 'User',
+            'is_active': user.is_active,
+            'is_first_login': user.is_first_login,
+            'date_joined': user.date_joined.strftime('%b %d, %Y'),
+            'last_login': user.last_login.strftime('%b %d, %Y %H:%M') if user.last_login else 'Never',
+            'picture_url': user.get_picture(),
+            'profile_url': user.get_absolute_url(),
+        })
+    
+    # Prepare response
+    response_data = {
+        'users': users_data,
+        'pagination': {
+            'current_page': users_page.number,
+            'total_pages': paginator.num_pages,
+            'total_count': total_count,
+            'has_previous': users_page.has_previous(),
+            'has_next': users_page.has_next(),
+            'per_page': per_page,
+        },
+        'filters': {
+            'search': search,
+            'role': role,
+            'status': status,
+            'first_login': first_login,
+        }
+    }
+    
+    return JsonResponse(response_data)
+
+
+@login_required
+@admin_required
+def user_quick_actions_ajax(request, user_id):
+    """
+    AJAX endpoint for quick actions on users.
+    
+    Actions:
+    - toggle_active: Toggle user active status
+    - reset_first_login: Reset first login status
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Invalid request method'}, status=405)
+    
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({'success': False, 'message': 'User not found'}, status=404)
+    
+    action = request.POST.get('action')
+    
+    if action == 'toggle_active':
+        user.is_active = not user.is_active
+        user.save()
+        return JsonResponse({
+            'success': True,
+            'message': f'User {"activated" if user.is_active else "deactivated"} successfully',
+            'is_active': user.is_active
+        })
+    
+    elif action == 'reset_first_login':
+        user.is_first_login = True
+        user.save()
+        return JsonResponse({
+            'success': True,
+            'message': 'User will be required to complete first-time setup on next login',
+            'is_first_login': user.is_first_login
+        })
+    
+    else:
+        return JsonResponse({'success': False, 'message': 'Invalid action'}, status=400)
 
 # ########################################################
 # Utility Functions

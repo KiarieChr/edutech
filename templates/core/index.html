@@ -1,81 +1,118 @@
 {% extends 'base.html' %}
 {% load i18n %}
-{% block title %}{{ title }} | {% trans 'Learning management system' %}{% endblock title %}
+{% block title %}{{ title }} | {% trans 'Fahari Academia' %}{% endblock title %}
 {% load static %}
 
 {% block content %}
 
+<!-- Alert Messages  -->
+{% include 'snippets/messages.html' %}
+<!-- Admin Quick Operations -->
+<div class="dashboard-header">
+    <h4 class="fw-bold mb-0">{% trans "Dashboard Overview" %}</h4>
+
+    {% if request.user.is_superuser %}
+    <a class="btn btn-primary btn-sm" href="{% url 'add_item' %}">
+        <i class="fas fa-plus me-1"></i> {% trans "New Post" %}
+    </a>
+    {% endif %}
+</div>
+<!-- Breadcrumbs  -->
 <nav style="--bs-breadcrumb-divider: '>';" aria-label="breadcrumb">
     <ol class="breadcrumb">
       <li class="breadcrumb-item active" aria-current="page">{% trans 'Home' %}</li>
     </ol>
 </nav>
-
-{% if request.user.is_superuser %}
-<div class="manage-wrap">
-    <a class="btn btn-primary" href="{% url 'add_item' %}"><i class="fas fa-plus"></i>{% trans 'Add New Post' %}</a>
-</div>
-{% endif %}
-
-{% include 'snippets/messages.html' %}
-
-<div>
-    <div class="title-1">{% trans 'News' %} &amp; {% trans 'Events' %}</div>
-</div>
-
-<div class="col-md-2 ms-auto d-flex">
-    <div class="me-3">
-        <span class="color-indicator bg-primary"></span> {% trans 'News' %}
-    </div>
-    <div>
-        <span class="color-indicator bg-purple"></span> {% trans 'Events' %}
-    </div>
-</div>
-
-<div class="container-fluid">
-    {% if items %}
-    <div class="row">
-        {% for item in items %}
-        <div class="col-md-4 mb-4">
-            <div class="bg-white border">
-                <div class="card-header-ne {% if item.posted_as == 'News' %}{% trans 'news' %}{% else %}{% trans 'events' %}{% endif %} p-2">
-                    <span class="p-0">
-                        {{ item.title|title }}
-                    </span>
-                    {% if request.user.is_superuser %}
-                    <div class="dropstart">
-                        <button class="btn btn-sm" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fas fa-ellipsis-v text-white"></i>
-                        </button>
-                        <div class="dropdown-menu">
-                            <a class="dropdown-item" href="{% url 'edit_post' pk=item.id %}"><i
-                                    class="unstyled me-2 fas fa-pencil-alt"></i>{% trans 'Edit' %}</a>
-                            <a class="dropdown-item" href="{% url 'delete_post' pk=item.id %}"><i
-                                    class="unstyled me-2 fas fa-trash-alt"></i>{% trans 'Delete' %}</a>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <div class="p-2 my-2" style="min-height: 120px;">{{ item.summary }}</div>
-
-                <div class="bg-light p-1 small text-secondary text-end pe-3">
-                    <i class="fa fa-calendar small unstyled"></i>
-                    {{ item.updated_date|timesince }} {% trans 'ago' %}
-                </div>
-
-            </div>
+<!-- Dashboard Stats -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-title">{% trans "Total Students" %}</div>
+            <div class="kpi-value">1,245</div>
         </div>
-        {% endfor %}
     </div>
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-title">{% trans "Staff Members" %}</div>
+            <div class="kpi-value">98</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-title">{% trans "Monthly Revenue" %}</div>
+            <div class="kpi-value">KES 4.2M</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-title">{% trans "Pending Tasks" %}</div>
+            <div class="kpi-value">12</div>
+        </div>
+    </div>
+</div>
 
-    {% else %}
-    <h4 class="text-center mt-5 py-5 text-muted">
-        <i class="fa-regular fa-folder-open me-2"></i>{% trans 'School news and events will appear here.' %}
-    </h4>
+<!-- Events, News, Recent Activity, latest Receipts, Financials Tabs  -->
+<ul class="nav dashboard-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link active" href="#">Financial Summary</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="#">Recent Receipts</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="#">Activity Log</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="#">Reports</a>
+    </li>
+</ul>
 
+
+<div class="row g-4">
+    {% for item in items %}
+    <div class="col-md-4">
+        <div class="news-card">
+
+            <div class="news-header {% if item.posted_as == 'News' %}news{% else %}events{% endif %} p-3">
+                <span>{{ item.title|title }}</span>
+
+                {% if request.user.is_superuser %}
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-light" data-bs-toggle="dropdown">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end">
+                        <a class="dropdown-item" href="{% url 'edit_post' pk=item.id %}">
+                            <i class="fas fa-edit me-2"></i>{% trans "Edit" %}
+                        </a>
+                        <a class="dropdown-item text-danger" href="{% url 'delete_post' pk=item.id %}">
+                            <i class="fas fa-trash me-2"></i>{% trans "Delete" %}
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="news-body">
+                {{ item.summary }}
+            </div>
+
+            <div class="news-footer">
+                <i class="far fa-clock me-1"></i>
+                {{ item.updated_date|timesince }} {% trans "ago" %}
+            </div>
+
+        </div>
+    </div>
+    {% endfor %}
+    {% if not items %}
+    <div class="text-center py-5">
+        <i class="far fa-folder-open fa-3x text-muted mb-3"></i>
+        <p class="text-muted">{% trans "School news and events will appear here." %}</p>
+    </div>
     {% endif %}
 
 </div>
+
 
 {% endblock content %}

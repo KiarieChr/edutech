@@ -79,6 +79,11 @@ class User(AbstractUser):
         upload_to="profile_pictures/%y/%m/%d/", default="default.png", null=True
     )
     email = models.EmailField(blank=True, null=True)
+    activated_on = models.DateTimeField(blank=True, null=True)
+    is_first_login = models.BooleanField(
+        default=True,
+        help_text="Indicates if user needs to complete first-time setup"
+    )
 
     username_validator = ASCIIUsernameValidator()
 

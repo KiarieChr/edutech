@@ -1,0 +1,348 @@
+{% extends 'registration/registration_base.html' %}
+{% load i18n %}
+{% block title %}{% trans "First Time Setup" %}{% endblock title %}
+
+{% block header %}
+<style>
+  .setup-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 2rem;
+  }
+  
+  .setup-card {
+    max-width: 550px;
+    width: 100%;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+  }
+  
+  .setup-header {
+    background: linear-gradient(135deg, #2F2C6B 0%, #3F3C8D 100%);
+    padding: 2.5rem 2rem;
+    text-align: center;
+    color: white;
+  }
+  
+  .setup-icon {
+    width: 80px;
+    height: 80px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+  }
+  
+  .setup-icon i {
+    font-size: 36px;
+  }
+  
+  .setup-body {
+    padding: 2.5rem 2rem;
+  }
+  
+  .welcome-text {
+    text-align: center;
+    margin-bottom: 2rem;
+    padding-bottom: 2rem;
+    border-bottom: 2px solid #f0f0f0;
+  }
+  
+  .welcome-text h5 {
+    color: #2F2C6B;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  
+  .welcome-text p {
+    color: #6c757d;
+    font-size: 0.95rem;
+  }
+  
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+  
+  .form-label {
+    font-weight: 600;
+    color: #2F2C6B;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+  }
+  
+  .form-control {
+    border-radius: 12px;
+    border: 2px solid #e0e6ed;
+    padding: 0.75rem 1rem;
+    transition: all 0.3s ease;
+  }
+  
+  .form-control:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.15);
+  }
+  
+  .password-requirements {
+    background: #f8f9fa;
+    border-left: 4px solid #667eea;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+  }
+  
+  .password-requirements h6 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #2F2C6B;
+    margin-bottom: 0.75rem;
+  }
+  
+  .password-requirements ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.85rem;
+    color: #6c757d;
+  }
+  
+  .password-requirements li {
+    margin-bottom: 0.25rem;
+  }
+  
+  .btn-setup {
+    width: 100%;
+    padding: 0.875rem;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #2F2C6B 0%, #667eea 100%);
+    border: none;
+    color: white;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  }
+  
+  .btn-setup:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  }
+  
+  .alert {
+    border-radius: 12px;
+    border: none;
+    margin-bottom: 1.5rem;
+  }
+  
+  .alert-danger {
+    background: linear-gradient(135deg, #ffeef0 0%, #ffe5e9 100%);
+    color: #dc3545;
+  }
+  
+  .errorlist {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0 0;
+  }
+  
+  .errorlist li {
+    color: #dc3545;
+    font-size: 0.875rem;
+    padding: 0.5rem;
+    background: #ffe5e9;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+  }
+  
+  .help-text {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+  }
+  
+  .security-note {
+    background: #e8f5e9;
+    border-left: 4px solid #4caf50;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+    color: #2e7d32;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="setup-container">
+  <div class="setup-card">
+    
+    <!-- Header -->
+    <div class="setup-header">
+      <div class="setup-icon">
+        <i class="fas fa-user-cog"></i>
+      </div>
+      <h3 class="mb-0">{% trans "Welcome!" %}</h3>
+      <p class="mb-0 mt-2 small opacity-75">{% trans "Complete Your Profile Setup" %}</p>
+    </div>
+    
+    <!-- Body -->
+    <div class="setup-body">
+      
+      <!-- Welcome Message -->
+      <div class="welcome-text">
+        <h5>{% trans "Hi" %} {{ user.first_name|default:user.username }}!</h5>
+        <p>
+          {% trans "This is your first time logging in. For security reasons, please create a new username and password." %}
+        </p>
+      </div>
+      
+      <!-- Messages -->
+      {% if messages %}
+        {% for message in messages %}
+          <div class="alert alert-{{ message.tags }} d-flex align-items-center" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <div>{{ message }}</div>
+          </div>
+        {% endfor %}
+      {% endif %}
+      
+      <!-- Form -->
+      <form method="post" id="setup-form" novalidate>
+        {% csrf_token %}
+        
+        <!-- Username Field -->
+        <div class="form-group">
+          <label for="{{ form.username.id_for_label }}" class="form-label">
+            <i class="fas fa-user me-1"></i>{% trans "Choose Your Username" %}
+          </label>
+          {{ form.username }}
+          {% if form.username.help_text %}
+            <small class="help-text">{{ form.username.help_text }}</small>
+          {% endif %}
+          {{ form.username.errors }}
+        </div>
+        
+        <!-- Password Requirements Info -->
+        <div class="password-requirements">
+          <h6><i class="fas fa-shield-alt me-1"></i>{% trans "Password Requirements" %}</h6>
+          <ul>
+            <li>{% trans "At least 8 characters long" %}</li>
+            <li>{% trans "Cannot be too similar to your username" %}</li>
+            <li>{% trans "Cannot be a commonly used password" %}</li>
+            <li>{% trans "Cannot be entirely numeric" %}</li>
+          </ul>
+        </div>
+        
+        <!-- New Password 1 -->
+        <div class="form-group">
+          <label for="{{ form.new_password1.id_for_label }}" class="form-label">
+            <i class="fas fa-lock me-1"></i>{% trans "New Password" %}
+          </label>
+          {{ form.new_password1 }}
+          {{ form.new_password1.errors }}
+        </div>
+        
+        <!-- New Password 2 -->
+        <div class="form-group">
+          <label for="{{ form.new_password2.id_for_label }}" class="form-label">
+            <i class="fas fa-lock me-1"></i>{% trans "Confirm Password" %}
+          </label>
+          {{ form.new_password2 }}
+          {{ form.new_password2.errors }}
+        </div>
+        
+        <!-- Non-field errors -->
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger">
+            {{ form.non_field_errors }}
+          </div>
+        {% endif %}
+        
+        <!-- Submit Button -->
+        <button type="submit" class="btn btn-setup" id="submit-btn">
+          <i class="fas fa-check-circle me-2"></i>{% trans "Complete Setup" %}
+        </button>
+        
+        <!-- Security Note -->
+        <div class="security-note">
+          <i class="fas fa-info-circle me-2"></i>
+          <strong>{% trans "Note:" %}</strong>
+          {% trans "You will be automatically logged in after completing this setup." %}
+        </div>
+        
+      </form>
+      
+    </div>
+  </div>
+</div>
+{% endblock content %}
+
+{% block js %}
+<script>
+  // Form submission handler
+  $('#setup-form').submit(function() {
+    $('#submit-btn').prop('disabled', true);
+    $('#submit-btn').html('<span class="spinner-border spinner-border-sm me-2"></span>{% trans "Processing..." %}');
+  });
+  $("#username_id").on("input", function () {
+    username = $(this).val();
+
+    $.ajax({
+      url: "/accounts/ajax/validate-usernam/",
+      data: {
+        username: username
+      },
+      dataType: 'json',
+      success: function (data) {
+        if (data.is_taken) {
+          $('#message-wrapper').html(`
+            <div class="small p-2 rounded" style="background: linear-gradient(135deg, #fff5f5 0%, #ffe5e5 100%); border-left: 3px solid #dc3545;">
+              <i class="fas fa-times-circle me-1" style="color: #dc3545;"></i>
+              <span style="color: #dc3545;"><b>${username}</b> already taken</span>
+            </div>
+          `)
+        }
+        else {
+          $('#message-wrapper').html(`
+            <div class="small p-2 rounded" style="background: linear-gradient(135deg, #f0fdf4 0%, #e5f9e7 100%); border-left: 3px solid #10b981;">
+              <i class="fas fa-check-circle me-1" style="color: #10b981;"></i>
+              <span style="color: #10b981;"><b>${username}</b> is valid</span>
+            </div>
+          `)
+        }
+      }
+    })
+  });
+  // Real-time password validation feedback (optional enhancement)
+  $('#id_new_password1').on('input', function() {
+    const password = $(this).val();
+    const username = $('#id_username').val();
+    
+    // Basic client-side validation feedback
+    if (password.length < 8) {
+      $(this).addClass('is-invalid');
+    } else {
+      $(this).removeClass('is-invalid');
+      $(this).addClass('is-valid');
+    }
+  });
+  
+  // Password confirmation matching
+  $('#id_new_password2').on('input', function() {
+    const password1 = $('#id_new_password1').val();
+    const password2 = $(this).val();
+    
+    if (password2 && password1 !== password2) {
+      $(this).addClass('is-invalid');
+    } else if (password2 && password1 === password2) {
+      $(this).removeClass('is-invalid');
+      $(this).addClass('is-valid');
+    }
+  });
+</script>
+{% endblock %}

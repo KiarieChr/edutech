@@ -1,0 +1,290 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load i18n %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-tachometer-alt me-2"></i>{% trans 'HR Dashboard' %}</h2>
+        <div>
+            <span class="text-muted">{% now "l, F d, Y" %}</span>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-2">{% trans 'Total Employees' %}</h6>
+                            <h2 class="mb-0">{{ total_employees }}</h2>
+                        </div>
+                        <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                            <i class="fas fa-users"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-2">{% trans 'Active' %}</h6>
+                            <h2 class="mb-0">{{ active_employees }}</h2>
+                        </div>
+                        <div class="stat-icon bg-success bg-opacity-10 text-success">
+                            <i class="fas fa-user-check"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-2">{% trans 'On Probation' %}</h6>
+                            <h2 class="mb-0">{{ on_probation }}</h2>
+                        </div>
+                        <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+                            <i class="fas fa-user-clock"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-muted mb-2">{% trans 'Pending Leaves' %}</h6>
+                            <h2 class="mb-0">{{ pending_leaves }}</h2>
+                        </div>
+                        <div class="stat-icon bg-info bg-opacity-10 text-info">
+                            <i class="fas fa-calendar-alt"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Employees by Category -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">{% trans 'Employees by Category' %}</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="employeeCategoryChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Today's Attendance -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">{% trans "Today's Attendance" %}</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-3">
+                            <h3 class="text-success">{{ attendance_today.present }}</h3>
+                            <small class="text-muted">{% trans 'Present' %}</small>
+                        </div>
+                        <div class="col-3">
+                            <h3 class="text-danger">{{ attendance_today.absent }}</h3>
+                            <small class="text-muted">{% trans 'Absent' %}</small>
+                        </div>
+                        <div class="col-3">
+                            <h3 class="text-warning">{{ attendance_today.late }}</h3>
+                            <small class="text-muted">{% trans 'Late' %}</small>
+                        </div>
+                        <div class="col-3">
+                            <h3 class="text-info">{{ attendance_today.on_leave }}</h3>
+                            <small class="text-muted">{% trans 'On Leave' %}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Recent Hires -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">{% trans 'Recent Hires (Last 30 Days)' %}</h5>
+                    <a href="{% url 'hr_payroll:employee_list' %}" class="btn btn-sm btn-outline-primary">
+                        {% trans 'View All' %}
+                    </a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>{% trans 'Emp No' %}</th>
+                                    <th>{% trans 'Name' %}</th>
+                                    <th>{% trans 'Department' %}</th>
+                                    <th>{% trans 'Hire Date' %}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for employee in recent_hires %}
+                                <tr>
+                                    <td><a href="{% url 'hr_payroll:employee_detail' employee.id %}">{{ employee.employee_no }}</a></td>
+                                    <td>{{ employee.get_full_name }}</td>
+                                    <td>{{ employee.department.name|default:"-" }}</td>
+                                    <td>{{ employee.hire_date|date:"M d, Y" }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted">{% trans 'No recent hires' %}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pending Leave Applications -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">{% trans 'Pending Leave Applications' %}</h5>
+                    <a href="{% url 'hr_payroll:leave_application_list' %}" class="btn btn-sm btn-outline-primary">
+                        {% trans 'View All' %}
+                    </a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>{% trans 'Employee' %}</th>
+                                    <th>{% trans 'Leave Type' %}</th>
+                                    <th>{% trans 'Start Date' %}</th>
+                                    <th>{% trans 'Days' %}</th>
+                                    <th>{% trans 'Action' %}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for application in pending_leave_applications %}
+                                <tr>
+                                    <td>{{ application.employee.get_full_name }}</td>
+                                    <td>{{ application.leave_type.name }}</td>
+                                    <td>{{ application.start_date|date:"M d, Y" }}</td>
+                                    <td>{{ application.working_days }} days</td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <a href="{% url 'hr_payroll:leave_application_approve' application.id %}" 
+                                               class="btn btn-success btn-sm" title="Approve">
+                                                <i class="fas fa-check"></i>
+                                            </a>
+                                            <a href="{% url 'hr_payroll:leave_application_reject' application.id %}" 
+                                               class="btn btn-danger btn-sm" title="Reject">
+                                                <i class="fas fa-times"></i>
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">{% trans 'No pending applications' %}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// Employee Category Chart
+const categoryData = {
+    labels: [
+        {% for cat in employees_by_category %}
+        '{{ cat.employee_category|title }}',
+        {% endfor %}
+    ],
+    datasets: [{
+        data: [
+            {% for cat in employees_by_category %}
+            {{ cat.count }},
+            {% endfor %}
+        ],
+        backgroundColor: [
+            'rgba(26, 35, 126, 0.8)',
+            'rgba(63, 81, 181, 0.8)',
+            'rgba(76, 175, 80, 0.8)',
+            'rgba(255, 152, 0, 0.8)',
+        ]
+    }]
+};
+
+new Chart(document.getElementById('employeeCategoryChart'), {
+    type: 'doughnut',
+    data: categoryData,
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom',
+            }
+        }
+    }
+});
+</script>
+{% endblock %}
+
+<style>
+.stat-card {
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-radius: 10px;
+    transition: transform 0.3s;
+}
+
+.stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.stat-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.card-header {
+    border-bottom: 2px solid #f0f0f0;
+}
+</style>

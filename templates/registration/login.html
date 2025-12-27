@@ -1,70 +1,174 @@
 {% extends 'registration/registration_base.html' %}
 {% load i18n %}
-{% block title %}{% trans  %}{% endblock title %}
+{% block title %}{% trans 'Login | Fahari Academia' %}{% endblock title %}
 {% load crispy_forms_tags %}
-{% block content %}
 
-<div class="col-md-4 mx-auto mt-5">
-  <div class="card">
-    <div class="form-title">
-      <i class="fas fa-lock me-2"></i>
-      {% trans 'Sign in' %}
-    </div>
-    <div class="card-body">
-        <form action="" method="POST" id="login-form">{% csrf_token %}
-          <div class="form-group mb-3">
-              <label class="mb-2" for="username_id"><i class="fas fa-address-card me-2"></i>{% trans 'ID Number' %}</label>
-              <input type="text" name="username" id="username_id" class="form-control" required>
-              <div id="message-wrapper"></div>
-          </div>
-          <div class="form-group mb-3">
-              <label class="mb-2" for="password_id"><i class="fas fa-key me-2"></i>{% trans 'Password' %}</label>
-              <input type="password" name="password" id="password_id" class="form-control" required>
-          </div>
-          {% if form.errors %}
-                <span class="text-danger"><i class="fas fa-exclamation-circle"></i> {% trans 'Invalid ID & Password.' %}</span><br>
-          {% endif %}
+{% block header %}
+<style>
+  
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-container">
+  
+  <!-- Left Side - Login Form -->
+  <div class="login-left">
+    <div class="login-card">
       
-          <button type="submit" class="btn btn-primary" id="login-btn"><i class="fas fa-sign-in-alt"></i><small>{% trans 'SIGN IN' %}</small></button>
+      <!-- Header Section -->
+      <div class="card-header login-card-header">
+        <div class="mb-3">
+          <div class="login-icon-wrapper">
+            <i class="fas fa-lock"></i>
+          </div>
+        </div>
+        <h4 class="text-white fw-bold mb-0">{% trans 'Welcome Back' %}</h4>
+        <p class="text-white-50 small mb-0 mt-1">{% trans 'Sign in to continue' %}</p>
+      </div>
+
+      <!-- Form Body -->
+      <div class="card-body p-4 p-sm-5">
+        <form action="" method="POST" id="login-form">{% csrf_token %}
+          
+          <!-- ID Number Field -->
+          <div class="mb-4">
+            <label class="form-label form-label-custom" for="username_id">
+              <i class="fas fa-user"></i>{% trans 'User ID' %}
+            </label>
+            <div class="form-input-wrapper">
+              <input 
+                type="text" 
+                name="username" 
+                id="username_id" 
+                class="form-control form-control-lg form-input" 
+                required placeholder="STUDENT ID/ STAFF ID/ PARENT ID">
+              <i class="fas fa-address-card form-input-icon"></i>
+            </div>
+            <div id="message-wrapper" class="mt-2"></div>
+          </div>
+
+          <!-- Password Field -->
+          <div class="mb-4">
+            <label class="form-label form-label-custom" for="password_id">
+              <i class="fas fa-key"></i>{% trans 'Password' %}
+            </label>
+            <div class="form-input-wrapper">
+              <input 
+                type="password" 
+                name="password" 
+                id="password_id" 
+                class="form-control form-control-lg form-input" 
+                style="padding-right: 45px;" placeholder="PASSWORD"
+                required>
+              <i class="fas fa-lock form-input-icon"></i>
+              <button 
+                type="button" 
+                id="toggle-password" 
+                class="btn password-toggle-btn">
+                <i class="fas fa-eye" id="toggle-icon"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Error Message -->
+          {% if form.errors %}
+          <div class="alert alert-danger d-flex align-items-center error-alert" role="alert">
+            <i class="fas fa-exclamation-circle"></i>
+            <div class="small">{% trans 'Invalid ID & Password.' %}</div>
+          </div>
+          {% endif %}
+
+          <!-- Sign In Button -->
+          <button 
+            type="submit" 
+            class="btn btn-lg w-100 text-white fw-semibold mb-3 btn-login" 
+            id="login-btn">
+            <i class="fas fa-sign-in-alt me-2"></i>{% trans 'SIGN IN' %}
+          </button>
+
+          <!-- Forgot Password Link -->
+          <div class="text-center">
+            <a href="{% url 'password_reset' %}" class="forgot-password-link">
+              <i class="fas fa-question-circle me-1"></i>{% trans 'Forgot password?' %}
+            </a>
+          </div>
+
         </form>
-        <br>
-        <div class="login-bottom">
-          <a href="{% url 'password_reset' %}" class="link">{% trans 'Forgot password ?' %}</a>
+        
+        <div class="text-center mt-4">
+          <p class="small text-muted mb-0">
+            <i class="fas fa-shield-alt me-1"></i>{% trans 'Your information is secure' %}
+          </p>
         </div>
       </div>
+    </div>
   </div>
+
+  <!-- Right Side - System Background/Preview -->
+  <div class="login-right">
+    <div class="system-preview">
+      <h2>Fahari Academia</h2>
+      <p>The Integrated ERP for Modern Learning Institutions</p>
+      
+      <div class="row g-3 mt-3">
+        <div class="col-md-6">
+          <div class="feature-box">
+            <i class="fas fa-shield-alt"></i>
+            <h5>Secure</h5>
+            <p class="small mb-0">Bank-level encryption</p>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="feature-box">
+            <i class="fas fa-bolt"></i>
+            <h5>Fast</h5>
+            <p class="small mb-0">Lightning quick access</p>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="feature-box">
+            <i class="fas fa-clock"></i>
+            <h5>24/7 Available</h5>
+            <p class="small mb-0">Access anytime, anywhere</p>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="feature-box">
+            <i class="fas fa-users"></i>
+            <h5>Trusted</h5>
+            <p class="small mb-0">By thousands of users</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
 </div>
+
 {% endblock content %}
 
 {% block js %}
-
 <script>
+  // Password toggle functionality
+  $('#toggle-password').click(function() {
+    const passwordInput = $('#password_id');
+    const toggleIcon = $('#toggle-icon');
+    
+    if (passwordInput.attr('type') === 'password') {
+      passwordInput.attr('type', 'text');
+      toggleIcon.removeClass('fa-eye').addClass('fa-eye-slash');
+    } else {
+      passwordInput.attr('type', 'password');
+      toggleIcon.removeClass('fa-eye-slash').addClass('fa-eye');
+    }
+  });
+
   $('#login-form').submit(function (e) {
-    // e.preventDefault();
     $('#login-btn').addClass('disabled')
-    $('#login-btn').html(`<i class="fas fa-sign-in-alt"></i> Signining you in . . .`)
+    $('#login-btn').html(`<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Signing you in...`)
   })
 
-  $("#username").on("input", function () {
-    username = $(this).val();
-
-    $.ajax({
-      url: "/accounts/ajax/validate-username/",
-      data: {
-        username: username
-      },
-      dataType: 'json',
-      success: function (data) {
-        if (data.is_taken) {
-          console.log(data.is_taken);
-          $('#message-wrapper').html(`<p class="my-2 text-danger"><span class="bg-error p-2"><b>${username}</b> already taken :( try another one </span></p>`)
-        }
-        else {
-          $('#message-wrapper').html(`<p class="my-2 text-success"><span class="bg-correct p-2"><b>${username}</b> is valid </span></p>`)
-        }
-      }
-
-    })
-  })
+  
 </script>
 {% endblock %}

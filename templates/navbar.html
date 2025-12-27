@@ -1,53 +1,108 @@
-{% load i18n%}
-<div id="top-navbar" class="py-1">
-	<div class="container">
-		<div class="nav-wrapper">
+{% load i18n %}
 
-			<div class="toggle-btn" onclick="toggleSidebar()">
-				<i class="fas fa-bars"></i>
-			</div>
+<div id="top-navbar" class="navbar navbar-expand bg-white shadow-sm px-3">
+    <div class="container-fluid d-flex align-items-center justify-content-between">
 
-			<form class="form-header" action="{% url 'query' %}" method="GET">
-				<input id="primary-search" class="form-control rounded-end-0" type="text" name="q" value="{{ request.GET.q }}"
-					placeholder="{% trans 'Search All... #course, #program, #Quiz, #News, #Events' %}" required />
-				<button class="btn btn-dark rounded-start-0" type="submit">
-					<i class="fas fa-search"></i>
-				</button>
-			</form>
+        <!-- LEFT: Sidebar Toggle + Search -->
+        <div class="d-flex align-items-center gap-3">
+            <button class="btn btn-light btn-sm" onclick="toggleSidebar()">
+                <i class="fas fa-bars"></i>
+            </button>
 
-			<div class="dropdown">
-				<div class="avatar border border-2" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-					<img src="{{ request.user.picture.url }}">
-				</div>
-				<div class="dropdown-menu" style="min-width: 14rem !important;">
-					<div class="d-flex flex-column align-items-center">
-						<div class="avatar avatar-md border">
-							<img src="{{ request.user.picture.url }}">
-						</div>
-	
-						<p class="small text-muted text-center mb-0">
-							{% trans 'Last login:' %} {{ request.user.last_login|date }}</p>
-					</div>
-					<hr>
+            <form class="d-none d-md-flex" action="{% url 'query' %}" method="GET">
+                <div class="input-group input-group-sm">
+                    <input
+                        class="form-control"
+                        type="text"
+                        name="q"
+                        value="{{ request.GET.q }}"
+                        placeholder="{% trans 'Search…' %}"
+                        required>
+                    <button class="btn btn-outline-secondary" type="submit">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
 
-					{% if request.user.is_lecturer or request.user.is_student %}
-					<a class="dropdown-item" href="{% url 'user_course_list' %}"><i class="fas fa-book me-2"></i>{% trans 'My Courses' %}</a>
-					{% endif %}
+        <!-- RIGHT: Actions -->
+        <div class="d-flex align-items-center gap-3">
 
-					{% if request.user.is_superuser %}
-					<a class="dropdown-item" href="{% url 'admin_panel' %}"><i class="fas fa-user-tie me-2"></i>{% trans 'Admin Panel' %}</a>
-					{% endif %}
+            <!-- Language Switch -->
+            <div class="dropdown">
+                <button class="btn btn-light btn-sm" data-bs-toggle="dropdown">
+                    <i class="fas fa-globe"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="?lang=en">English</a></li>
+                    <li><a class="dropdown-item" href="?lang=sw">Swahili</a></li>
+                </ul>
+            </div>
 
-					<a class="dropdown-item" href="{% url 'profile' %}"><i class="fas fa-user me-2"></i>{% trans 'Profile' %}</a>
-					<a class="dropdown-item" href="{% url 'edit_profile' %}"><i class="fas fa-cog me-2"></i>{% trans 'Setting' %}</a>
-					<hr>
-					<div style="display: flex; justify-content: center; align-items: center;">
-						<a class="btn btn-secondary" href="{% url 'logout' %}">
-							<i class="fas fa-sign-out-alt"></i> {% trans 'Signout' %}
-						</a>
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
+            <!-- Notifications -->
+            <div class="dropdown">
+                <button class="btn btn-light btn-sm position-relative" data-bs-toggle="dropdown">
+                    <i class="far fa-bell"></i>
+                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                        3
+                    </span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end notification-dropdown">
+                    <li class="dropdown-header">{% trans "Notifications" %}</li>
+                    <li><a class="dropdown-item small" href="#">New assignment uploaded</a></li>
+                    <li><a class="dropdown-item small" href="#">Payroll processed</a></li>
+                    <li><a class="dropdown-item small" href="#">System update available</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-center small" href="#">View all</a></li>
+                </ul>
+            </div>
+
+            <!-- Settings -->
+            <a href="{% url 'edit_profile' %}" class="btn btn-light btn-sm">
+                <i class="fas fa-cog"></i>
+            </a>
+
+            <!-- User Menu -->
+            <div class="dropdown">
+                <a class="avatar avatar-sm d-block" data-bs-toggle="dropdown">
+                    <img src="{{ request.user.picture.url }}" alt="User">
+                </a>
+
+                <ul class="dropdown-menu dropdown-menu-end p-3" style="min-width: 16rem;">
+                    <div class="text-center mb-2">
+                        <img class="rounded-circle mb-2" width="64" src="{{ request.user.picture.url }}">
+                        <p class="mb-0 fw-semibold">{{ request.user.get_full_name|default:request.user.username }}</p>
+                        <small class="text-muted">
+                            {% trans "Last login" %}: {{ request.user.last_login|date }}
+                        </small>
+                    </div>
+
+                    <hr>
+
+                    {% if request.user.is_lecturer or request.user.is_student %}
+                    <a class="dropdown-item" href="{% url 'user_course_list' %}">
+                        <i class="fas fa-book me-2"></i>{% trans "My Courses" %}
+                    </a>
+                    {% endif %}
+
+                    {% if request.user.is_superuser %}
+                    <a class="dropdown-item" href="{% url 'admin_panel' %}">
+                        <i class="fas fa-user-shield me-2"></i>{% trans "Admin Panel" %}
+                    </a>
+                    {% endif %}
+
+                    <a class="dropdown-item" href="{% url 'profile' %}">
+                        <i class="fas fa-user me-2"></i>{% trans "Profile" %}
+                    </a>
+
+                    <hr>
+
+                    <a class="btn btn-outline-danger w-100 btn-sm" href="{% url 'logout' %}">
+                        <i class="fas fa-sign-out-alt me-1"></i>{% trans "Sign out" %}
+                    </a>
+                </ul>
+            </div>
+
+        </div>
+    </div>
 </div>

@@ -2,156 +2,535 @@
 {% load i18n %}
 
 <div id="side-nav">
-	<div class="main-menu">
-		<div class="top-side text-center py-4" style="background-image: url({% static 'img/dotted.jpg' %});">
-			<div class="desktop-hide">
-				<div class="toggle-btn" onclick="toggleSidebar()">
-					<i class="fas fa-times"></i>
-				</div>
-			</div>
-			<a href="/">
-				<img src="{% static 'img/brand.svg' %}" width="210px" alt="SkyLearn">
-			</a>
-			<p class="mt-2 small">
-				<mark class="bg-secondary text-light" style="border-radius: 2px; padding: 2px 5px;">
-					{{ request.user.get_user_role }}
-				</mark>
-			</p>
-		</div>
-		{% url 'home' as hom %} {% url 'dashboard' as dash %} {% url 'profile' as prof %}
-		{% url 'lecturer_list' as lec %}
-		{% url 'student_list' as stu %} {% url 'course_allocation_view' as cav %}
-		{% url 'programs' as pro %} {% url 'session_list' as sess %} {% url 'semester_list' as sem %}
-		{% url 'add_score' as ascore %} {% url 'grade_results' as vr %}{% url 'ass_results' as ar %}
-		{% url 'course_registration' as cr %} {% url 'edit_profile' as ep %} {% url 'change_password' as cp %}
-		{% url 'quiz_progress' as qpr %} {% url 'quiz_marking' as qce %} {% url 'user_course_list' as ucl %}
-		{% url 'admin_panel' as admin_p %}
-		
+  <div class="main-menu">
+    <!-- Header -->
+    <div class="top-side text-center">
+      <div class="desktop-hide">
+        <div class="toggle-btn" onclick="toggleSidebar()">
+          <i class="fas fa-times"></i>
+        </div>
+      </div>
+      <a href="/">
+        <img src="" width="50px" alt="Fahari Academia">
+      </a>
+      <!-- <p class="mt-2 small">
+        <mark class="bg-secondary text-light" style="border-radius: 2px; padding: 2px 5px;">
+          {{ request.user.get_user_role }}
+        </mark>
+      </p> -->
+    </div>
 
+    <!-- URL Variables -->
+    {% url 'home' as hom %}
+    {% url 'dashboard' as dash %}
+  
+    {% url 'users_dashboard' as users %}
+    {% url 'lecturer_list' as lec %}
+    {% url 'student_list' as stu %}
+    {% url 'programs' as pro %}
+    {% url 'add_score' as ascore %}
+    {% url 'grade_results' as vr %}
+    {% url 'ass_results' as ar %}
+    {% url 'course_registration' as cr %}
+    {% url 'edit_profile' as ep %}
+    {% url 'change_password' as cp %}
+    {% url 'quiz_progress' as qpr %}
+    {% url 'quiz_marking' as qce %}
+    {% url 'user_course_list' as ucl %}
+    {% url 'admin_panel' as admin_p %}
 
-		<ul>
-			{% if request.user.is_superuser %}
-			<li class="{% if request.path == dash %}active{% endif %}">
-				<a href="{% url 'dashboard' %}"><i class="fas fa-tachometer-alt"></i>{% trans 'Dashboard' %}</a>
-			</li>
-			{% endif %}
-			<li class="{% if request.path == hom %}active{% endif %}">
-				<a href="{% url 'home' %}"><i class="fas fa-home"></i>{% trans 'Home' %}</a>
-			</li>
-			<li class="{% if request.path == prof %}active{% endif %}">
-				<a href="{% url 'profile' %}"><i class="fas fa-user"></i>{% trans 'Profile' %}</a>
-			</li>
+    <ul class="list-unstyled">
 
-			{% if request.user.is_superuser %}
-			<li class="{% if request.path == admin_p %}active{% endif %}">
-				<a href="{% url 'admin_panel' %}"><i class="fas fa-user-tie"></i>{% trans 'Admin Panel' %}</a>
-			</li>
-			<li class="{% if request.path == lec %}active{% endif %}">
-				<a href="{% url 'lecturer_list' %}"><i class="fas fa-chalkboard-teacher"></i>{% trans 'Lecturers' %}</a>
-			</li>
-			<li class="{% if request.path == stu %}active{% endif %}">
-				<a href="{% url 'student_list' %}"><i class="fas fa-user-graduate"></i>{% trans 'Students' %}</a>
-			</li>
-			{% endif %}
+      <!-- ============================================ -->
+      <!-- DASHBOARD (Superuser Only) -->
+      <!-- ============================================ -->
+      {% if request.user.is_superuser %}
+      <li class="{% if request.path == dash %}active{% endif %}">
+        <a href="{% url 'dashboard' %}">
+          <i class="fas fa-tachometer-alt"></i>
+          {% trans 'Dashboard' %}
+        </a>
+      </li>
+      {% endif %}
 
-			{% if request.user.is_lecturer or request.user.is_student %}
-			<li class="{% if request.path == ucl %}active{% endif %}">
-				<a href="{% url 'user_course_list' %}"><i class="fas fa-book"></i>{% trans 'My Courses' %}</a>
-			</li>
-			{% endif %}
+      <!-- ============================================ -->
+      <!-- HOME -->
+      <!-- ============================================ -->
+      <li class="{% if request.path == hom %}active{% endif %}">
+        <a href="{% url 'home' %}">
+          <i class="fas fa-home"></i>
+          {% trans 'Home' %}
+        </a>
+      </li>
 
-			{% if request.user.is_superuser or request.user.is_lecturer %}
-			<li class="{% if request.path == pro %}active{% endif %}">
-				<a href="{% url 'programs' %}"><i class="fas fa-book-open"></i>{% trans 'Classes & Subjects' %}</a>
-			</li>
-			{% endif %}
+     
 
-			{% if request.user.is_superuser or request.user.is_lecturer %}
-			<li class="{% if request.path == qce %}active{% endif %}">
-				<a href="{% url 'quiz_marking' %}"><i class="fas fa-check-double"></i>{% trans 'Complete Exams' %}</a>
-			</li>
-			{% endif %}
+      <!-- ============================================ -->
+      <!-- USER MANAGEMENT (Superuser Only) -->
+      <!-- ============================================ -->
+     
+     <!-- HR & PAYROLL MANAGEMENT (Superuser Only) -->
+      {% if request.user.is_superuser %}
+      <li class="menu-section-divider">
+          <span class="section-title">{% trans 'HR & PAYROLL' %}</span>
+      </li>
 
-			{% if request.user.is_superuser %}
-			<li class="{% if request.path == qpr %}active{% endif %}">
-				<a href="{% url 'quiz_progress' %}"><i class="fas fa-record-vinyl"></i>{% trans 'Quiz Progress Rec' %}</a>
-			</li>
-			<li class="{% if request.path == cav %}active{% endif %}">
-				<a href="{% url 'course_allocation_view' %}"><i class="fas fa-tasks"></i>{% trans 'Subject Allocation' %}</a>
-			</li>
-			<li class="{% if request.path == sess %}active{% endif %}">
-				<a href="{% url 'session_list' %}"><i class="fas fa-calendar-week"></i>{% trans 'Manage Session' %}</a>
-			</li>
-			<li class="{% if request.path == sem %}active{% endif %}">
-				<a href="{% url 'semester_list' %}"><i class="fas fa-calendar-alt"></i>{% trans 'Manage Semester' %}</a>
-			</li>
-			{% endif %}
+      <!-- HR Dashboard -->
+      <li class="{% if request.path == '/hr_payroll/' %}active{% endif %}">
+          <a href="{% url 'hr_payroll:hr_dashboard' %}">
+              <i class="fas fa-tachometer-alt"></i>
+              {% trans 'HR Dashboard' %}
+          </a>
+      </li>
 
-			{% if request.user.is_lecturer %}
-			<li class="{% if request.path == ascore %}active{% endif %}">
-				<a href="{% url 'add_score' %}"><i class="fas fa-table"></i>{% trans 'Manage Score' %}</a>
-			</li>
-			{% endif %}
+      <!-- Employee Management -->
+      <li>
+          <a href="#hrEmployeeSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+              <i class="fas fa-users"></i>
+              {% trans 'Employee Management' %}
+              <i class="fas fa-chevron-down dropdown-icon"></i>
+          </a>
+          <ul class="collapse list-unstyled submenu" id="hrEmployeeSubmenu">
+              <li>
+                  <a href="{% url 'hr_payroll:employee_list' %}">
+                      <i class="fas fa-list"></i>
+                      {% trans 'Employee Register' %}
+                  </a>
+              </li>
+              <li>
+                  <a href="{% url 'hr_payroll:employee_create' %}">
+                      <i class="fas fa-user-plus"></i>
+                      {% trans 'Add Employee' %}
+                  </a>
+              </li>
+          </ul>
+      </li>
 
-			{% if request.user.is_student %}
-			<li class="{% if request.path == qpr %}active{% endif %}">
-				<a href="{% url 'quiz_progress' %}"><i class="fas fa-record-vinyl"></i>{% trans 'Quiz Progress Rec' %}</a>
-			</li>
-			<li class="{% if request.path == vr %}active{% endif %}">
-				<a href="{% url 'grade_results' %}"><i class="fa fa-spell-check"></i>{% trans 'Grade Results' %}</a>
-			</li>
-			<li class="{% if request.path == ar %}active{% endif %}">
-				<a href="{% url 'ass_results' %}"><i class="fa fa-list-ol"></i> {% trans 'Assesment Results' %}</a>
-			</li>
-			<li class="{% if request.path == cr %}active{% endif %}">
-				<a href="{% url 'course_registration' %}"><i class="fas fa-plus"></i>{% trans 'Add' %} &amp; {% trans 'Drop Course' %}</a>
-			</li>
-			{% endif %}
-			<br />
-			<p class="ms-3 text-secondary">&RightArrow; Others</p>
-			<li class="{% if request.path == ep %}active{% endif %}">
-				<a href="{% url 'edit_profile' %}"><i class="fas fa-cogs"></i>{% trans 'Account Setting' %}</a>
-			</li>
-			<li class="{% if request.path == cp %}active{% endif %}">
-				<a href="{% url 'change_password' %}"><i class="fas fa-key"></i>{% trans 'Change Password' %}</a>
-			</li>
-		</ul>
-	</div>
+      <!-- Attendance Management -->
+      <li>
+          <a href="#hrAttendanceSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+              <i class="fas fa-clock"></i>
+              {% trans 'Attendance' %}
+              <i class="fas fa-chevron-down dropdown-icon"></i>
+          </a>
+          <ul class="collapse list-unstyled submenu" id="hrAttendanceSubmenu">
+              <li>
+                  <a href="{% url 'hr_payroll:attendance_list' %}">
+                      <i class="fas fa-list-alt"></i>
+                      {% trans 'View Attendance' %}
+                  </a>
+              </li>
+              <li>
+                  <a href="{% url 'hr_payroll:attendance_mark' %}">
+                      <i class="fas fa-check-circle"></i>
+                      {% trans 'Mark Attendance' %}
+                  </a>
+              </li>
+          </ul>
+      </li>
 
-	<footer class="card-footer mt-5 pt-3 pb-5 px-2">
-		<div class="col-12">
+      <!-- Leave Management -->
+      <li>
+          <a href="#hrLeaveSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+              <i class="fas fa-calendar-alt"></i>
+              {% trans 'Leave Management' %}
+              <i class="fas fa-chevron-down dropdown-icon"></i>
+          </a>
+          <ul class="collapse list-unstyled submenu" id="hrLeaveSubmenu">
+              <li>
+                  <a href="{% url 'hr_payroll:leave_application_list' %}">
+                      <i class="fas fa-list"></i>
+                      {% trans 'Leave Applications' %}
+                  </a>
+              </li>
+              <li>
+                  <a href="{% url 'hr_payroll:leave_application_create' %}">
+                      <i class="fas fa-plus"></i>
+                      {% trans 'Apply for Leave' %}
+                  </a>
+              </li>
+              <li>
+                  <a href="{% url 'hr_payroll:leave_balance_view' %}">
+                      <i class="fas fa-balance-scale"></i>
+                      {% trans 'Leave Balances' %}
+                  </a>
+              </li>
+          </ul>
+      </li>
 
-			<form action="{% url 'set_language' %}" method="post" id="lang-form">{% csrf_token %}
-				<input name="next" type="hidden" value="{{ redirect_to }}">
-				<select class="small" name="language" id="lang-select">
-					{% get_current_language as LANGUAGE_CODE %}
-					{% get_available_languages as LANGUAGES %}
-					{% get_language_info_list for LANGUAGES as languages %}
-					{% for language in languages %}
-						<option value="{{ language.code }}"{% if language.code == LANGUAGE_CODE %} selected{% endif %}>
-							{{ language.name_local }} ({{ language.code }})
-						</option>
-					{% endfor %}
-				</select>
-			</form>
+      <!-- Payroll Management -->
+      <li>
+          <a href="#hrPayrollSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+              <i class="fas fa-money-bill-wave"></i>
+              {% trans 'Payroll' %}
+              <i class="fas fa-chevron-down dropdown-icon"></i>
+          </a>
+          <ul class="collapse list-unstyled submenu" id="hrPayrollSubmenu">
+              <li>
+                  <a href="{% url 'hr_payroll:payroll_dashboard' %}">
+                      <i class="fas fa-chart-line"></i>
+                      {% trans 'Payroll Dashboard' %}
+                  </a>
+              </li>
+              <li>
+                  <a href="{% url 'hr_payroll:payroll_period_list' %}">
+                      <i class="fas fa-calendar-check"></i>
+                      {% trans 'Payroll Periods' %}
+                  </a>
+              </li>
+          </ul>
+      </li>
+      <li>
+        <a href="#usersSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+          <i class="fas fa-users-cog"></i>
+          {% trans 'User Management' %}
+          <i class="fas fa-chevron-down dropdown-icon"></i>
+        </a>
+        <ul class="collapse list-unstyled submenu" id="usersSubmenu">
+          <li class="{% if request.path == admin_p %}active{% endif %}">
+            <a href="{% url 'admin_panel' %}">
+              <i class="fas fa-shield-alt"></i>
+              {% trans 'Admin Panel' %}
+            </a>
+          </li>
+          <li class="{% if request.path == lec %}active{% endif %}">
+            <a href="{% url 'lecturer_list' %}">
+              <i class="fas fa-chalkboard-teacher"></i>
+              {% trans 'Lecturers' %}
+            </a>
+          </li>
+          <li class="{% if request.path == stu %}active{% endif %}">
+            <a href="{% url 'student_list' %}">
+              <i class="fas fa-user-graduate"></i>
+              {% trans 'Students' %}
+            </a>
+          </li>
+          <li class="{% if request.path == users %}active{% endif %}">
+            <a href="{% url 'users_dashboard' %}">
+              <i class="fas fa-user-graduate"></i>
+              {% trans 'Users' %}
+            </a>
+          </li>
+        </ul>
+      </li>
+      {% endif %}
 
-			<p class="small m-0">
-				{% trans 'Read our' %} <a href="#"> {% trans 'Privacy' %} </a> {% trans 'and' %} <a href="#"> {% trans 'Terms of use.' %} </a>
-				<br />SkyLearn &copy; <script>document.write(new Date().getFullYear());</script>
-				<br />
-			</p>
-			<a href="https://github.com/SkyCascade/SkyLearn" class="btn btn-sm btn-dark mx-auto" target="_blank">
-				{% trans '⭐️ Star This Project' %}
-			</a>
-		</div>
-	</footer>
+      <!-- ============================================ -->
+      <!-- ACADEMIC (All Roles) -->
+      <!-- ============================================ -->
+      {% if request.user.is_lecturer or request.user.is_student or request.user.is_superuser %}
+      <li class="menu-section-divider">
+        <span class="section-title">{% trans 'ACADEMIC' %}</span>
+      </li>
+
+      <li>
+        <a href="#academicSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+          <i class="fas fa-graduation-cap"></i>
+          {% trans 'Classes' %}
+          <i class="fas fa-chevron-down dropdown-icon"></i>
+        </a>
+        <ul class="collapse list-unstyled submenu" id="academicSubmenu">
+          {% if request.user.is_lecturer or request.user.is_student %}
+          <li class="{% if request.path == ucl %}active{% endif %}">
+            <a href="{% url 'user_course_list' %}">
+              <i class="fas fa-book-reader"></i>
+              {% trans 'My Class' %}
+            </a>
+          </li>
+          {% endif %}
+          {% if request.user.is_superuser or request.user.is_lecturer %}
+          <li class="{% if request.path == pro %}active{% endif %}">
+            <a href="{% url 'programs' %}">
+              <i class="fas fa-list-alt"></i>
+              {% trans 'All Programs' %}
+            </a>
+          </li>
+          <li class="{% if request.path == ucl %}active{% endif %}">
+            <a href="{% url 'user_course_list' %}">
+              <i class="fas fa-book-reader"></i>
+              {% trans 'Classes' %}
+            </a>
+          </li>
+          {% endif %}
+        </ul>
+      </li>
+      {% endif %}
+
+      <!-- ============================================ -->
+      <!-- ASSESSMENTS & RESULTS -->
+      <!-- ============================================ -->
+      {% if request.user.is_superuser or request.user.is_lecturer or request.user.is_student %}
+      <li>
+        <a href="#assessmentsSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+          <i class="fas fa-file-alt"></i>
+          {% trans 'Assessments & Results' %}
+          <i class="fas fa-chevron-down dropdown-icon"></i>
+        </a>
+        <ul class="collapse list-unstyled submenu" id="assessmentsSubmenu">
+          <!-- Lecturer & Superuser Options -->
+          {% if request.user.is_superuser or request.user.is_lecturer %}
+          <li class="{% if request.path == qce %}active{% endif %}">
+            <a href="{% url 'quiz_marking' %}">
+              <i class="fas fa-check-double"></i>
+              {% trans 'Complete Exams' %}
+            </a>
+          </li>
+          {% endif %}
+          
+          {% if request.user.is_lecturer %}
+          <li class="{% if request.path == ascore %}active{% endif %}">
+            <a href="{% url 'add_score' %}">
+              <i class="fas fa-edit"></i>
+              {% trans 'Manage Scores' %}
+            </a>
+          </li>
+          {% endif %}
+
+          <!-- Student Options -->
+          {% if request.user.is_student %}
+          <li class="{% if request.path == qpr %}active{% endif %}">
+            <a href="{% url 'quiz_progress' %}">
+              <i class="fas fa-chart-line"></i>
+              {% trans 'Quiz Progress' %}
+            </a>
+          </li>
+          <li class="{% if request.path == vr %}active{% endif %}">
+            <a href="{% url 'grade_results' %}">
+              <i class="fas fa-award"></i>
+              {% trans 'Grade Results' %}
+            </a>
+          </li>
+          <li class="{% if request.path == ar %}active{% endif %}">
+            <a href="{% url 'ass_results' %}">
+              <i class="fas fa-list-ol"></i>
+              {% trans 'Assessment Results' %}
+            </a>
+          </li>
+          <li class="{% if request.path == cr %}active{% endif %}">
+            <a href="{% url 'course_registration' %}">
+              <i class="fas fa-plus-circle"></i>
+              {% trans 'Add & Drop Courses' %}
+            </a>
+          </li>
+          {% endif %}
+        </ul>
+      </li>
+      {% endif %}
+
+      <!-- ============================================ -->
+      <!-- SETTINGS -->
+      <!-- ============================================ -->
+      <li class="menu-section-divider">
+        <span class="section-title">{% trans 'SYSTEM' %}</span>
+      </li>
+
+      <li>
+        <a href="#settingsSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="has-dropdown">
+          <i class="fas fa-cog"></i>
+          {% trans 'Settings' %}
+          <i class="fas fa-chevron-down dropdown-icon"></i>
+        </a>
+        <ul class="collapse list-unstyled submenu" id="settingsSubmenu">
+          <li class="{% if request.path == ep %}active{% endif %}">
+            <a href="{% url 'edit_profile' %}">
+              <i class="fas fa-user-edit"></i>
+              {% trans 'Account Settings' %}
+            </a>
+          </li>
+          <li class="{% if request.path == cp %}active{% endif %}">
+            <a href="{% url 'change_password' %}">
+              <i class="fas fa-key"></i>
+              {% trans 'Change Password' %}
+            </a>
+          </li>
+        </ul>
+      </li>
+
+    </ul>
+  </div>
+
+  <!-- Footer -->
+  <footer class="card-footer mt-5 pt-3 pb-5 px-2">
+    <div class="col-12">
+      <!-- Language Selector -->
+      <form action="{% url 'set_language' %}" method="post" id="lang-form">
+        {% csrf_token %}
+        <input name="next" type="hidden" value="{{ redirect_to }}">
+        <select class="form-select form-select-sm mb-3" name="language" id="lang-select">
+          {% get_current_language as LANGUAGE_CODE %}
+          {% get_available_languages as LANGUAGES %}
+          {% get_language_info_list for LANGUAGES as languages %}
+          {% for language in languages %}
+            <option value="{{ language.code }}"{% if language.code == LANGUAGE_CODE %} selected{% endif %}>
+              {{ language.name_local }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+
+      <!-- Footer Links -->
+      <p class="small m-0 text-center opacity-75">
+        {% trans 'Read our' %} <a href="#">{% trans 'Privacy' %}</a> {% trans 'and' %} <a href="#">{% trans 'Terms' %}</a>
+        <br />Fahari Academia &copy; <script>document.write(new Date().getFullYear());</script>
+      </p>
+    </div>
+  </footer>
 </div>
 
 {% block js %}
 <script>
-	document.getElementById("lang-select").addEventListener("change", function() {
-		console.log("Changed!")
-    	document.getElementById("lang-form").submit();  // Submit the form programmatically
-	});
+  // Language selector auto-submit
+  document.getElementById("lang-select").addEventListener("change", function() {
+    document.getElementById("lang-form").submit();
+  });
+
+  // Enhanced submenu toggle with rotation
+  document.querySelectorAll('#side-nav a[data-bs-toggle="collapse"]').forEach(link => {
+    link.addEventListener('click', function(e) {
+      const icon = this.querySelector('.dropdown-icon');
+      const targetId = this.getAttribute('href');
+      const target = document.querySelector(targetId);
+      
+      // Toggle icon rotation
+      if (target.classList.contains('show')) {
+        icon.classList.remove('rotate');
+      } else {
+        // Close other open dropdowns
+        document.querySelectorAll('#side-nav .submenu.show').forEach(openMenu => {
+          if (openMenu !== target) {
+            openMenu.classList.remove('show');
+            const openLink = document.querySelector(`[href="#${openMenu.id}"]`);
+            if (openLink) {
+              openLink.querySelector('.dropdown-icon')?.classList.remove('rotate');
+            }
+          }
+        });
+        icon.classList.add('rotate');
+      }
+    });
+  });
+
+  // Automatically expand submenu if current page is inside it
+  document.addEventListener('DOMContentLoaded', function() {
+    const activeSubmenuItem = document.querySelector('#side-nav .submenu li.active');
+    if (activeSubmenuItem) {
+      const submenu = activeSubmenuItem.closest('.submenu');
+      if (submenu) {
+        submenu.classList.add('show');
+        const parentLink = document.querySelector(`[href="#${submenu.id}"]`);
+        if (parentLink) {
+          parentLink.querySelector('.dropdown-icon')?.classList.add('rotate');
+        }
+      }
+    }
+  });
 </script>
+
+<style>
+  /* Section Divider */
+  .menu-section-divider {
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    padding: 0 1rem;
+  }
+
+  .section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+  }
+
+  /* Dropdown Icon Animation */
+  .dropdown-icon {
+    font-size: 0.75rem;
+    margin-left: auto;
+    transition: transform 0.3s ease;
+  }
+
+  .dropdown-icon.rotate {
+    transform: rotate(180deg);
+  }
+
+  /* Submenu Styling */
+  .submenu {
+    padding-left: 0;
+    margin-top: 0.25rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .submenu li {
+    margin-bottom: 0;
+  }
+
+  .submenu li a {
+    padding: 0.65rem 1rem 0.65rem 3rem;
+    font-size: 0.9rem;
+    position: relative;
+  }
+
+  .submenu li a i {
+    font-size: 0.9rem;
+    margin-right: 0.75rem;
+    width: 20px;
+  }
+
+  .submenu li.active a {
+    background: rgba(212, 175, 55, 0.2);
+    border-left: 3px solid var(--fa-accent);
+  }
+
+  /* Has Dropdown */
+  .has-dropdown {
+    justify-content: space-between;
+  }
+
+  /* Active parent when child is active */
+  .submenu li.active a::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--fa-accent);
+  }
+
+  /* Footer Enhancement */
+  #side-nav footer {
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  #side-nav footer .form-select {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    border-radius: 8px;
+  }
+
+  #side-nav footer .form-select:focus {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: var(--fa-accent);
+    box-shadow: 0 0 0 0.2rem rgba(212, 175, 55, 0.25);
+    color: white;
+  }
+
+  #side-nav footer .form-select option {
+    background: var(--fa-primary);
+    color: white;
+  }
+
+  #side-nav footer a {
+    color: var(--fa-accent);
+  }
+
+  #side-nav footer a:hover {
+    color: var(--fa-accent-light);
+    text-decoration: underline;
+  }
+</style>
 {% endblock js %}
