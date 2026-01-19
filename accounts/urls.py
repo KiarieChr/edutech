@@ -81,4 +81,5 @@ urlpatterns = [
     path('users-dashboard/', users_dashboard, name='users_dashboard'),
     path('ajax/users-list/', users_list_ajax, name='users_list_ajax'),
     path('ajax/user/<int:user_id>/actions/', user_quick_actions_ajax, name='user_quick_actions'),
+    
 ]

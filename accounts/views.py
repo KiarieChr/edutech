@@ -36,12 +36,7 @@ from result.models import TakenCourse
 class CustomLoginView(DjangoLoginView):
     """
     Custom login view that checks for first-time login.
-    
-    Flow:
-    1. User submits credentials
-    2. If auth fails → show error
-    3. If auth succeeds and is_first_login=True → redirect to setup
-    4. If auth succeeds and is_first_login=False → login normally
+    Now supports email or username authentication.
     """
     form_class = CustomAuthenticationForm
     template_name = 'registration/login.html'
@@ -51,11 +46,11 @@ class CustomLoginView(DjangoLoginView):
         """
         Override to check for first-time login before logging in.
         """
-        username = form.cleaned_data.get('username')
+        identifier = form.cleaned_data.get('email_or_username')
         password = form.cleaned_data.get('password')
         
         # Authenticate user
-        user = authenticate(self.request, username=username, password=password)
+        user = authenticate(self.request, username=identifier, password=password)
         
         if user is not None:
             # Check if this is first time login
@@ -76,16 +71,6 @@ class CustomLoginView(DjangoLoginView):
         # This shouldn't happen if form validation passed, but as a safety
         form.add_error(None, _("Authentication failed."))
         return self.form_invalid(form)
-    
-    def get_success_url(self):
-        """
-        Redirect to dashboard after successful login.
-        """
-        next_url = self.request.GET.get('next')
-        if next_url:
-            return next_url
-        return reverse('home')  # or 'dashboard'
-
 
 class FirstTimeSetupView(FormView):
     """

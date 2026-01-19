@@ -1,6 +1,5 @@
 from django.db import models
 from django.urls import reverse
-from django.contrib.auth.models import AbstractUser, UserManager
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from django.db.models import Q
@@ -8,6 +7,11 @@ from PIL import Image
 
 from course.models import Program
 from .validators import ASCIIUsernameValidator
+from django.contrib.auth.models import AbstractUser, BaseUserManager, UserManager
+from django.utils.translation import gettext_lazy as _
+from PIL import Image
+import os
+from django.contrib.auth.validators import UnicodeUsernameValidator 
 
 
 # LEVEL_COURSE = "Level course"
@@ -39,29 +43,84 @@ RELATION_SHIP = (
 )
 
 
-class CustomUserManager(UserManager):
+
+
+class CustomUserManager(BaseUserManager):
+    """Custom user manager that handles email and username authentication."""
+    
+    def create_user(self, email=None, username=None, password=None, **extra_fields):
+        """
+        Create and save a regular User with the given email and password.
+        """
+        if not email and not username:
+            raise ValueError(_('At least email or username must be set'))
+        
+        # Normalize email if provided
+        if email:
+            email = self.normalize_email(email)
+            extra_fields['email'] = email
+            
+        # Generate username from email if not provided
+        if not username and email:
+            # Use email prefix as username
+            username = email.split('@')[0]
+            # Ensure uniqueness
+            base_username = username
+            counter = 1
+            while self.model.objects.filter(username=base_username).exists():
+                base_username = f"{username}{counter}"
+                counter += 1
+            username = base_username
+        
+        # Create user
+        user = self.model(username=username, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+    
+    def create_superuser(self, email=None, username=None, password=None, **extra_fields):
+        """
+        Create and save a SuperUser with the given email and password.
+        """
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
+        
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError(_('Superuser must have is_staff=True.'))
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError(_('Superuser must have is_superuser=True.'))
+        
+        return self.create_user(email, username, password, **extra_fields)
+    
     def search(self, query=None):
+        """Search users by username, email, first name, or last name."""
         queryset = self.get_queryset()
         if query is not None:
             or_lookup = (
-                Q(username__icontains=query)
-                | Q(first_name__icontains=query)
-                | Q(last_name__icontains=query)
-                | Q(email__icontains=query)
+                Q(username__icontains=query) |
+                Q(first_name__icontains=query) |
+                Q(last_name__icontains=query) |
+                Q(email__icontains=query)
             )
-            queryset = queryset.filter(
-                or_lookup
-            ).distinct()  # distinct() is often necessary with Q lookups
+            queryset = queryset.filter(or_lookup).distinct()
         return queryset
-
+    
     def get_student_count(self):
         return self.model.objects.filter(is_student=True).count()
-
+    
     def get_lecturer_count(self):
         return self.model.objects.filter(is_lecturer=True).count()
-
+    
     def get_superuser_count(self):
         return self.model.objects.filter(is_superuser=True).count()
+    
+    def get_by_email(self, email):
+        """Get user by email address."""
+        try:
+            return self.get(email__iexact=email)
+        except self.model.DoesNotExist:
+            return None
 
 
 GENDERS = ((_("M"), _("Male")), (_("F"), _("Female")))
@@ -84,24 +143,25 @@ class User(AbstractUser):
         default=True,
         help_text="Indicates if user needs to complete first-time setup"
     )
-
-    username_validator = ASCIIUsernameValidator()
-
+    
+    # Updated to UnicodeUsernameValidator
+    username_validator = UnicodeUsernameValidator()
+    
     objects = CustomUserManager()
-
+    
     class Meta:
         ordering = ("-date_joined",)
-
+    
     @property
     def get_full_name(self):
         full_name = self.username
         if self.first_name and self.last_name:
-            full_name = self.first_name + " " + self.last_name
+            full_name = f"{self.first_name} {self.last_name}"
         return full_name
-
+    
     def __str__(self):
         return "{} ({})".format(self.username, self.get_full_name)
-
+    
     @property
     def get_user_role(self):
         if self.is_superuser:
@@ -112,36 +172,55 @@ class User(AbstractUser):
             role = _("Lecturer")
         elif self.is_parent:
             role = _("Parent")
-
+        elif self.is_dep_head:
+            role = _("Department Head")
+        else:
+            role = _("User")
         return role
-
+    
     def get_picture(self):
         try:
             return self.picture.url
         except:
             no_picture = settings.MEDIA_URL + "default.png"
             return no_picture
-
+    
     def get_absolute_url(self):
         return reverse("profile_single", kwargs={"user_id": self.id})
-
+    
     def save(self, *args, **kwargs):
+        # If no username but has email, generate username from email
+        if not self.username and self.email:
+            username = self.email.split('@')[0]
+            # Ensure uniqueness
+            base_username = username
+            counter = 1
+            while User.objects.filter(username=base_username).exclude(pk=self.pk).exists():
+                base_username = f"{username}{counter}"
+                counter += 1
+            self.username = base_username
+        
         super().save(*args, **kwargs)
+        
+        # Resize picture if it exists
         try:
-            img = Image.open(self.picture.path)
-            if img.height > 300 or img.width > 300:
-                output_size = (300, 300)
-                img.thumbnail(output_size)
-                img.save(self.picture.path)
-        except:
-            pass
-
+            if self.picture and self.picture.name != 'default.png':
+                img = Image.open(self.picture.path)
+                if img.height > 300 or img.width > 300:
+                    output_size = (300, 300)
+                    img.thumbnail(output_size)
+                    img.save(self.picture.path)
+        except Exception as e:
+            print(f"Error resizing image: {e}")
+    
     def delete(self, *args, **kwargs):
-        if self.picture.url != settings.MEDIA_URL + "default.png":
-            self.picture.delete()
+        if self.picture and self.picture.name != 'default.png':
+            try:
+                if os.path.isfile(self.picture.path):
+                    os.remove(self.picture.path)
+            except:
+                pass
         super().delete(*args, **kwargs)
-
-
 class StudentManager(models.Manager):
     def search(self, query=None):
         qs = self.get_queryset()

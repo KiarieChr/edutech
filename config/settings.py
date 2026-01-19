@@ -28,11 +28,12 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = ["127.0.0.1","localhost"]
+ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0', '192.168.100.27']
 
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
 
+ENVIRONMENT = 'development'
 # Application definition
 
 DJANGO_APPS = [
@@ -46,6 +47,7 @@ DJANGO_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 ]
+
 
 # Third party apps
 THIRD_PARTY_APPS = [
@@ -71,7 +73,13 @@ PROJECT_APPS = [
 # Combine all apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
 
+AUTHENTICATION_BACKENDS = [
+    'accounts.backends.EmailOrUsernameModelBackend',
+    'django.contrib.auth.backends.ModelBackend',  # Keep default as fallback
+]
+
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -123,6 +131,11 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer',
+    ],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.FormParser',
+        'rest_framework.parsers.MultiPartParser',
     ],
 }
 LOGGING = {
@@ -340,3 +353,81 @@ SEMESTER_CHOICES = (
     (SECOND, _("Second")),
     (THIRD, _("Third")),
 )
+
+# CORS Configuration
+if ENVIRONMENT == 'production':
+    CORS_ALLOWED_ORIGINS = [
+        "https://your-react-app.com",
+        "https://www.your-react-app.com",
+    ]
+    CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
+    
+elif ENVIRONMENT == 'staging':
+    CORS_ALLOWED_ORIGINS = [
+        "https://staging.your-react-app.com",
+        "http://localhost:8000",
+    ]
+    CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
+    
+else:  # development
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+    ]
+    # For development convenience
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ORIGIN_ALLOW_ALL = True
+
+# CORS settings
+CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ['Content-Disposition']
+
+# CORS methods and headers
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-access-token',
+]
+
+# Session settings (important for authentication)
+SESSION_COOKIE_SAMESITE = 'Lax' if ENVIRONMENT == 'production' else 'None'
+SESSION_COOKIE_SECURE = ENVIRONMENT == 'production'
+SESSION_COOKIE_HTTPONLY = True
+
+# CSRF settings
+CSRF_COOKIE_SAMESITE = 'Lax' if ENVIRONMENT == 'production' else 'None'
+CSRF_COOKIE_SECURE = ENVIRONMENT == 'production'
+CSRF_COOKIE_HTTPONLY = True
+
+# If you want to disable CSRF for API (not recommended)
+# CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS  # Already set above
+
+# Security settings for production
+if ENVIRONMENT == 'production':
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = True
+    SECURE_REDIRECT_EXEMPT = []

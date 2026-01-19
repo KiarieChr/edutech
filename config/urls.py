@@ -11,6 +11,7 @@ admin.site.site_header = "SkyLearn Admin"
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("i18n/", include("django.conf.urls.i18n")),
+    path('api/', include('accounts.api_urls')),
 ]
 
 urlpatterns += i18n_patterns(
@@ -20,7 +21,7 @@ urlpatterns += i18n_patterns(
     path(
         "jet/dashboard/", include("jet.dashboard.urls", "jet-dashboard")
     ),  # Django JET dashboard URLS
-    path("accounts/", include("accounts.urls")),
+    path("", include("accounts.urls")),
     path("programs/", include("course.urls")),
     path("result/", include("result.urls")),
     path("search/", include("search.urls")),

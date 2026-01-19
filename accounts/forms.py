@@ -12,275 +12,213 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from accounts.models import User
 
+# accounts/forms.py
+from django import forms
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm, PasswordChangeForm
+from django.contrib.auth import authenticate, get_user_model
+from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
+
+User = get_user_model()
+
 
 class CustomAuthenticationForm(AuthenticationForm):
-    """
-    Custom login form that handles first-time login detection.
-    Does NOT log in users with is_first_login=True.
-    """
-    username = forms.CharField(
-        max_length=254,
+    """Authentication form that accepts email or username."""
+    email_or_username = forms.CharField(
+        label=_("Email or Username"),
         widget=forms.TextInput(attrs={
-            'class': 'form-control form-control-lg form-input',
-            'placeholder': _('Enter your User ID'),
-            'autofocus': True
+            'autofocus': True,
+            'class': 'form-control',
+            'placeholder': _('Enter your email or username')
         })
     )
     password = forms.CharField(
         label=_("Password"),
         strip=False,
         widget=forms.PasswordInput(attrs={
-            'class': 'form-control form-control-lg form-input',
-            'placeholder': _('Enter your password'),
+            'class': 'form-control',
+            'placeholder': _('Enter your password')
         }),
     )
-
-    error_messages = {
-        'invalid_login': _(
-            "Please enter a correct username and password. "
-            "Note that both fields may be case-sensitive."
-        ),
-        'inactive': _("This account is inactive."),
-        'first_time_login': _("First time login detected. Please complete your profile setup."),
-    }
-
-    def confirm_login_allowed(self, user):
-        """
-        Override to check if user is active.
-        We do NOT check is_first_login here - handled in view.
-        """
-        if not user.is_active:
-            raise ValidationError(
-                self.error_messages['inactive'],
-                code='inactive',
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Remove the default username field
+        self.fields.pop('username', None)
+    
+    def clean(self):
+        identifier = self.cleaned_data.get('email_or_username')
+        password = self.cleaned_data.get('password')
+        
+        if identifier and password:
+            self.user_cache = authenticate(
+                self.request,
+                username=identifier,
+                password=password
             )
+            
+            if self.user_cache is None:
+                raise self.get_invalid_login_error()
+            else:
+                self.confirm_login_allowed(self.user_cache)
+        
+        return self.cleaned_data
 
 
-class FirstTimeSetupForm(forms.Form):
-    """
-    Form for first-time users to set their username and password.
-    """
+class FirstTimeSetupForm(forms.ModelForm):
+    email = forms.EmailField(
+        label=_("Email Address"),
+        widget=forms.EmailInput(attrs={
+            'class': 'form-control',
+            'placeholder': _('Enter your email address')
+        })
+    )
     username = forms.CharField(
-        max_length=150,
-        label=_("New Username"),
-        help_text=_("Letters, digits and @/./+/-/_ only."),
+        label=_("Username"),
+        required=False,
         widget=forms.TextInput(attrs={
-            'class': 'form-control form-control-lg form-input',
-            'placeholder': _('Choose a username'),
-            'autofocus': True
+            'class': 'form-control',
+            'placeholder': _('Choose a username (optional)')
+        })
+    )
+    password = forms.CharField(
+        label=_("Password"),
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control',
+            'placeholder': _('Enter a strong password')
+        }),
+        min_length=8
+    )
+    confirm_password = forms.CharField(
+        label=_("Confirm Password"),
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control',
+            'placeholder': _('Confirm your password')
         })
     )
     
-    new_password1 = forms.CharField(
-        label=_("New Password"),
-        strip=False,
-        widget=forms.PasswordInput(attrs={
-            'class': 'form-control form-control-lg form-input',
-            'placeholder': _('Create a strong password'),
-            'autocomplete': 'new-password'
-        }),
-        help_text=_(
-            "Your password must contain at least 8 characters and "
-            "cannot be entirely numeric or too common."
-        ),
-    )
+    class Meta:
+        model = User
+        fields = ['email', 'username', 'first_name', 'last_name', 'phone', 'address', 'gender']
+        widgets = {
+            'first_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'last_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'phone': forms.TextInput(attrs={'class': 'form-control'}),
+            'address': forms.TextInput(attrs={'class': 'form-control'}),
+            'gender': forms.Select(attrs={'class': 'form-control'}),
+        }
     
-    new_password2 = forms.CharField(
-        label=_("Confirm Password"),
-        strip=False,
-        widget=forms.PasswordInput(attrs={
-            'class': 'form-control form-control-lg form-input',
-            'placeholder': _('Re-enter your password'),
-            'autocomplete': 'new-password'
-        }),
-    )
-
-    def __init__(self, user, *args, **kwargs):
-        """
-        Initialize form with current user instance.
-        """
-        self.user = user
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        # Pre-populate username field with current username
-        if user:
-            self.fields['username'].initial = user.username
-
+        
+        if self.user:
+            self.fields['email'].initial = self.user.email
+            self.fields['username'].initial = self.user.username
+    
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        
+        if self.user and User.objects.filter(email__iexact=email).exclude(pk=self.user.pk).exists():
+            raise ValidationError(_("This email is already registered."))
+        
+        return email
+    
     def clean_username(self):
-        """
-        Validate that the username is unique (excluding current user).
-        """
         username = self.cleaned_data.get('username')
         
-        if User.objects.filter(username=username).exclude(pk=self.user.pk).exists():
-            raise ValidationError(
-                _("This username is already taken. Please choose another."),
-                code='duplicate_username'
-            )
+        if username and self.user:
+            if User.objects.filter(username__iexact=username).exclude(pk=self.user.pk).exists():
+                raise ValidationError(_("This username is already taken."))
         
         return username
-
-    def clean_new_password1(self):
-        """
-        Validate password using Django's password validators.
-        """
-        password = self.cleaned_data.get('new_password1')
-        
-        # Run all configured password validators
-        validate_password(password, self.user)
-        
-        return password
-
+    
     def clean(self):
-        """
-        Verify that passwords match.
-        """
         cleaned_data = super().clean()
-        password1 = cleaned_data.get('new_password1')
-        password2 = cleaned_data.get('new_password2')
-
-        if password1 and password2 and password1 != password2:
-            raise ValidationError(
-                _("The two password fields didn't match."),
-                code='password_mismatch'
-            )
-
+        password = cleaned_data.get('password')
+        confirm_password = cleaned_data.get('confirm_password')
+        
+        if password and confirm_password and password != confirm_password:
+            self.add_error('confirm_password', _("Passwords do not match."))
+        
         return cleaned_data
-
+    
     def save(self, commit=True):
-        """
-        Save the new username and password, and mark first login as complete.
-        """
-        username = self.cleaned_data['username']
-        password = self.cleaned_data['new_password1']
+        if self.user:
+            user = self.user
+            user.email = self.cleaned_data['email']
+            
+            if self.cleaned_data.get('username'):
+                user.username = self.cleaned_data['username']
+            
+            user.first_name = self.cleaned_data.get('first_name', user.first_name)
+            user.last_name = self.cleaned_data.get('last_name', user.last_name)
+            user.phone = self.cleaned_data.get('phone', user.phone)
+            user.address = self.cleaned_data.get('address', user.address)
+            user.gender = self.cleaned_data.get('gender', user.gender)
+            
+            user.set_password(self.cleaned_data['password'])
+            user.is_first_login = False
+            
+            if commit:
+                user.save()
+            
+            return user
         
-        self.user.username = username
-        self.user.set_password(password)
-        self.user.is_first_login = False  # Mark setup as complete
-        
-        if commit:
-            self.user.save()
-        
-        return self.user
+        return super().save(commit=commit)
 
 
+# Update your existing forms to use email
 class StaffAddForm(UserCreationForm):
-    username = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control",
-            }
-        ),
-        label="Username",
-        required=False,
+    email = forms.EmailField(
+        label=_("Email Address"),
+        required=True,
+        widget=forms.EmailInput(attrs={'class': 'form-control'})
     )
-
-    first_name = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control",
-            }
-        ),
-        label="First Name",
-    )
-
-    last_name = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control",
-            }
-        ),
-        label="Last Name",
-    )
-
-    gender = forms.CharField(
-        widget=forms.Select(
-            choices=GENDERS,
-            attrs={
-                "class": "browser-default custom-select form-control",
-            },
-        ),
-    )
-
-    address = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control",
-            }
-        ),
-        label="Address",
-    )
-
-    phone = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control",
-            }
-        ),
-        label="Mobile No.",
-    )
-
-    email = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "text",
-                "class": "form-control",
-            }
-        ),
-        label="Email",
-    )
-
-    password1 = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "password",
-                "class": "form-control",
-            }
-        ),
-        label="Password",
-        required=False,
-    )
-
-    password2 = forms.CharField(
-        max_length=30,
-        widget=forms.TextInput(
-            attrs={
-                "type": "password",
-                "class": "form-control",
-            }
-        ),
-        label="Password Confirmation",
-        required=False,
-    )
-
-    class Meta(UserCreationForm.Meta):
+    
+    class Meta:
         model = User
-
-    @transaction.atomic()
+        fields = ['email', 'first_name', 'last_name', 'is_lecturer', 'is_dep_head']
+        widgets = {
+            'first_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'last_name': forms.TextInput(attrs={'class': 'form-control'}),
+            'is_lecturer': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'is_dep_head': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['password1'].widget.attrs.update({'class': 'form-control'})
+        self.fields['password2'].widget.attrs.update({'class': 'form-control'})
+        self.fields.pop('username', None)  # Remove username field
+    
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        if User.objects.filter(email__iexact=email).exists():
+            raise ValidationError(_("A user with this email already exists."))
+        return email
+    
     def save(self, commit=True):
         user = super().save(commit=False)
-        user.is_lecturer = True
-        user.first_name = self.cleaned_data.get("first_name")
-        user.last_name = self.cleaned_data.get("last_name")
-        user.phone = self.cleaned_data.get("phone")
-        user.address = self.cleaned_data.get("address")
-        user.email = self.cleaned_data.get("email")
-
+        user.email = self.cleaned_data['email']
+        # Generate username from email
+        user.username = user.email.split('@')[0]
+        
+        # Ensure username is unique
+        base_username = user.username
+        counter = 1
+        while User.objects.filter(username=base_username).exists():
+            base_username = f"{user.username}{counter}"
+            counter += 1
+        user.username = base_username
+        
+        user.is_first_login = True
+        
         if commit:
             user.save()
-
+        
         return user
+
 
 
 class StudentAddForm(UserCreationForm):
