@@ -26,40 +26,10 @@ router.register(r'payroll-calculations', PayrollCalculationViewSet, basename='pa
 router.register(r'payslips', PayslipViewSet, basename='payslip')
 
 
-
 urlpatterns = [
-    path('', views.hr_dashboard, name='hr_dashboard'),
-    path('payroll-dashboard/', views.payroll_dashboard, name='payroll_dashboard'),
-    
-    # Employees
-    path('employees/', views.employee_list, name='employee_list'),
-    path('employees/create/', views.employee_create, name='employee_create'),
-    path('employees/<int:employee_id>/', views.employee_detail, name='employee_detail'),
-    path('employees/<int:employee_id>/edit/', views.employee_edit, name='employee_edit'),
-    
-    # Attendance
-    path('attendance/', views.attendance_list, name='attendance_list'),
-    path('attendance/mark/', views.attendance_mark, name='attendance_mark'),
-    
-    # Leave
-    path('leave/', views.leave_application_list, name='leave_application_list'),
-    path('leave/create/', views.leave_application_create, name='leave_application_create'),
-    path('leave/<int:application_id>/approve/', views.leave_application_approve, name='leave_application_approve'),
-    path('leave/<int:application_id>/reject/', views.leave_application_reject, name='leave_application_reject'),
-    path('leave/balances/', views.leave_balance_view, name='leave_balance_view'),
-    
-    # Payroll
-    path('payroll/', views.payroll_period_list, name='payroll_period_list'),
-    path('payroll/<int:period_id>/', views.payroll_period_detail, name='payroll_period_detail'),
-    path('payroll/calculation/<int:calculation_id>/', views.payroll_calculation_detail, name='payroll_calculation_detail'),
-    
-    # Reports
-    path('reports/payslip/<int:calculation_id>/pdf/', views.download_payslip_pdf, name='download_payslip_pdf'),
-    path('reports/employees/excel/', views.download_employee_list_excel, name='download_employee_list_excel'),
-    path('reports/payroll/<int:period_id>/excel/', views.download_payroll_register_excel, name='download_payroll_register_excel'),
-    path('reports/attendance/excel/', views.download_attendance_report_excel, name='download_attendance_report_excel'),
+    # API endpoints
+    path('api/', include(router.urls)),
 
-    
     # ========================================================================
     # PDF REPORTS
     # ========================================================================
