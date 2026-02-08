@@ -31,5 +31,12 @@ class UserAdmin(admin.ModelAdmin):
 
 
 admin.site.register(User, UserAdmin)
-admin.site.register(Student)
+@admin.register(Student)
+class StudentAdmin(admin.ModelAdmin):
+    list_display = ("get_full_name", "admission_number")
+    search_fields = ("student__username", "student__first_name", "student__last_name", "admission_number")
+
+    def get_full_name(self, obj):
+        return obj.student.get_full_name
+    get_full_name.short_description = 'Name'
 admin.site.register(Parent)

@@ -153,8 +153,6 @@ class TakenCourse(models.Model):
 
         taken_courses = TakenCourse.objects.filter(
             student=self.student,
-            course__level=self.student.level,
-            course__semester=current_semester.semester,
         )
 
         total_points = sum(tc.point for tc in taken_courses)
@@ -181,9 +179,4 @@ class Result(models.Model):
     student = models.ForeignKey(Student, on_delete=models.CASCADE)
     gpa = models.FloatField(null=True)
     cgpa = models.FloatField(null=True)
-    semester = models.CharField(max_length=100, choices=settings.SEMESTER_CHOICES)
     session = models.CharField(max_length=100, blank=True, null=True)
-    level = models.CharField(max_length=25, choices=settings.LEVEL_CHOICES, null=True)
-
-    def __str__(self):
-        return f"Result for {self.student} - Semester: {self.semester}, Level: {self.level}"

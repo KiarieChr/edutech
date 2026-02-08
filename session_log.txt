@@ -1,0 +1,22 @@
+Total ClassSessions: 15
+ID: 29, Name: Grade 6 (CBC) - Term 3 2028 2028, AY: 5 (2028), Term: Term 3 2028 (2028), Grade: Grade 6 (COMPETENCY BASED CURRICULUM)
+ID: 28, Name: Grade 6 (CBC) - Term 2 2028 2028, AY: 5 (2028), Term: Term 2 2028 (2028), Grade: Grade 6 (COMPETENCY BASED CURRICULUM)
+ID: 27, Name: Grade 6 (CBC) - Term 1 2028 2028, AY: 5 (2028), Term: Term 1 2028 (2028), Grade: Grade 6 (COMPETENCY BASED CURRICULUM)
+ID: 26, Name: Grade 5 (CBC) - Term 3 2027 2027, AY: 2 (2027), Term: Term 3 2027 (2027), Grade: Grade 5 (COMPETENCY BASED CURRICULUM)
+ID: 25, Name: Grade 5 (CBC) - Term 2 2027 2027, AY: 2 (2027), Term: Term 2 2027 (2027), Grade: Grade 5 (COMPETENCY BASED CURRICULUM)
+ID: 24, Name: Grade 5 (CBC) - Term 1 2027 2027, AY: 2 (2027), Term: Term 1 2027 (2027), Grade: Grade 5 (COMPETENCY BASED CURRICULUM)
+ID: 23, Name: Grade 4 (CBC) - Term 3 2026 2026, AY: 1 (2026), Term: Term 3 2026 (2026), Grade: Grade 4 (COMPETENCY BASED CURRICULUM)
+ID: 22, Name: Grade 4 (CBC) - Term 2 2026 2026, AY: 1 (2026), Term: Term 2 2026 (2026), Grade: Grade 4 (COMPETENCY BASED CURRICULUM)
+ID: 21, Name: Grade 4 (CBC) - Term 1 2026 2026, AY: 1 (2026), Term: Term 1 2026 (2026), Grade: Grade 4 (COMPETENCY BASED CURRICULUM)
+ID: 20, Name: Grade 3 (CBC) - Term 3 2025 2025, AY: 3 (2025), Term: Term 3 2025 (2025), Grade: Grade 3 (COMPETENCY BASED CURRICULUM)
+ID: 19, Name: Grade 3 (CBC) - Term 2 2025 2025, AY: 3 (2025), Term: Term 2 2025 (2025), Grade: Grade 3 (COMPETENCY BASED CURRICULUM)
+ID: 18, Name: Grade 3 (CBC) - Term 1 2025 2025, AY: 3 (2025), Term: Term 1 2025 (2025), Grade: Grade 3 (COMPETENCY BASED CURRICULUM)
+ID: 17, Name: Grade 2 (CBC) - Term 3 2024 2024, AY: 4 (2024), Term: Term 3 2024 (2024), Grade: Grade 2 (COMPETENCY BASED CURRICULUM)
+ID: 16, Name: Grade 2 (CBC) - Term 2 2024 2024, AY: 4 (2024), Term: Term 2 2024 (2024), Grade: Grade 2 (COMPETENCY BASED CURRICULUM)
+ID: 15, Name: Grade 2 (CBC) - Term 1 2024 2024, AY: 4 (2024), Term: Term 1 2024 (2024), Grade: Grade 2 (COMPETENCY BASED CURRICULUM)
+
+--- Intakes ---
+Intake: 2027 INTAKE (ID: 2), AY: 2
+Intake: 2026 intake (ID: 1), AY: 1
+Intake: Class of 2024 (ID: 3), AY: 4
+Intake: 2023 Intake (ID: 4), AY: 7

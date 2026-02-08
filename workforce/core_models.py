@@ -139,6 +139,15 @@ class Employee(AuditedModel):
     def get_full_name(self):
         return f"{self.first_name} {self.middle_name} {self.last_name}".strip()
 
+    # Link to User model for authentication/permissions
+    user = models.OneToOneField(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_profile'
+    )
+
 
 # ============================================================================
 # MODULE 1: ADDRESS & LOCATION MANAGEMENT

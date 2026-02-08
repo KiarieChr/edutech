@@ -1,4 +1,4 @@
-"""
+﻿"""
 HR & Payroll Django Models for Academic ERP
 Part 3: Job & Role Management
 """
@@ -237,7 +237,8 @@ class Department(AuditedModel):
     name = models.CharField(max_length=200)
     department_type = models.CharField(
         max_length=20, 
-        choices=DepartmentType.choices
+        choices=DepartmentType.choices,
+        default=DepartmentType.ADMINISTRATIVE
     )
     
     faculty = models.ForeignKey(
@@ -262,8 +263,8 @@ class Department(AuditedModel):
         related_name='department_head'
     )
     
-    campus = models.ForeignKey(Campus, on_delete=models.PROTECT)
-    cost_center_code = models.CharField(max_length=50)
+    campus = models.ForeignKey(Campus, on_delete=models.PROTECT, null=True, blank=True)
+    cost_center_code = models.CharField(max_length=50, blank=True, null=True)
     
     is_active = models.BooleanField(default=True)
     budget_allocation = models.DecimalField(
@@ -1952,7 +1953,7 @@ class TimetableSubstitution(AuditedModel):
         ]
     
     def __str__(self):
-        return f"{self.original_lecturer.employee_no} → {self.substitute_lecturer.employee_no}"
+        return f"{self.original_lecturer.employee_no} â†’ {self.substitute_lecturer.employee_no}"
 
 
 class ShiftAttendance(AuditedModel):
@@ -3022,7 +3023,7 @@ class EmployeeEarning(AuditedModel):
     class CalculationBasis(models.TextChoices):
         FIXED = 'fixed', _('Fixed Amount')
         HOURS = 'hours', _('Hours Worked')
-        RATE = 'rate', _('Rate × Units')
+        RATE = 'rate', _('Rate Ã— Units')
         PERCENTAGE = 'percentage', _('Percentage')
     
     class Status(models.TextChoices):
@@ -3473,3 +3474,4 @@ class PayrollAuditLog(TimestampedModel):
     
     def __str__(self):
         return f"{self.get_action_display()} - {self.payroll_period.period_name}"
+

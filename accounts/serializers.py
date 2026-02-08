@@ -4,9 +4,27 @@ from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
-from .models import User, Student, Parent
+from .models import User, Student, Parent, Activity
+
+from django.contrib.auth.models import Group, Permission
 
 User = get_user_model()
+
+class PermissionSerializer(serializers.ModelSerializer):
+    module = serializers.CharField(source='content_type.app_label', read_only=True)
+    
+    class Meta:
+        model = Permission
+        fields = ['id', 'name', 'codename', 'content_type', 'module']
+
+class GroupSerializer(serializers.ModelSerializer):
+    permissions = serializers.PrimaryKeyRelatedField(many=True, queryset=Permission.objects.all(), required=False)
+    user_count = serializers.IntegerField(source='user_set.count', read_only=True)
+    
+    class Meta:
+        model = Group
+        fields = ['id', 'name', 'permissions', 'user_count']
+
 
 
 class DashboardSummarySerializer(serializers.Serializer):
@@ -367,11 +385,79 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 
 # ====================
-# Other Serializers
+# Student & Parent Serializers
 # ====================
 
-# Add your Student, Parent, and other serializers here...
-# (Keep your existing serializers for these models)
+class StudentSerializer(serializers.ModelSerializer):
+    """Serializer for Student model with current enrollment information"""
+    # User information
+    user_id = serializers.IntegerField(source='student.id', read_only=True)
+    username = serializers.CharField(source='student.username', read_only=True)
+    email = serializers.EmailField(source='student.email', read_only=True)
+    first_name = serializers.CharField(source='student.first_name', read_only=True)
+    last_name = serializers.CharField(source='student.last_name', read_only=True)
+    full_name = serializers.CharField(source='student.get_full_name', read_only=True)
+    gender = serializers.CharField(source='student.gender', read_only=True)
+    phone = serializers.CharField(source='student.phone', read_only=True)
+    picture_url = serializers.CharField(source='student.get_picture', read_only=True)
+    
+    # Intake/Cohort information
+    intake_id = serializers.IntegerField(source='intake.id', read_only=True, allow_null=True)
+    intake_name = serializers.CharField(read_only=True, allow_null=True)
+    intake_code = serializers.CharField(read_only=True, allow_null=True)
+    intake_year_name = serializers.CharField(read_only=True, allow_null=True)
+    years_in_school = serializers.IntegerField(read_only=True, allow_null=True)
+    
+    # Current enrollment information (from new properties)
+    current_grade_id = serializers.IntegerField(source='current_grade.id', read_only=True, allow_null=True)
+    current_grade_name = serializers.CharField(source='current_grade.name', read_only=True, allow_null=True)
+    current_stream_id = serializers.IntegerField(source='current_stream.id', read_only=True, allow_null=True)
+    current_stream_name = serializers.CharField(source='current_stream.name', read_only=True, allow_null=True)
+    current_academic_year_id = serializers.IntegerField(source='current_academic_year.id', read_only=True, allow_null=True)
+    current_academic_year_name = serializers.CharField(source='current_academic_year.name', read_only=True, allow_null=True)
+    current_term_id = serializers.IntegerField(source='current_term.id', read_only=True, allow_null=True)
+    current_term_name = serializers.CharField(source='current_term.name', read_only=True, allow_null=True)
+    current_enrollment_id = serializers.IntegerField(source='current_enrollment.id', read_only=True, allow_null=True)
+    
+    # Program information
+    program_name = serializers.CharField(source='program.title', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = Student
+        fields = [
+            'id', 'user_id', 'username', 'email', 'first_name', 'last_name', 
+            'full_name', 'gender', 'phone', 'picture_url',
+            'level', 'program', 'program_name',
+            # Intake fields
+            'intake', 'intake_id', 'intake_name', 'intake_code',
+            'intake_year_name', 'admission_date', 'years_in_school',
+            # Current enrollment fields
+            'current_enrollment_id', 'current_grade_id', 'current_grade_name',
+            'current_stream_id', 'current_stream_name',
+            'current_academic_year_id', 'current_academic_year_name',
+            'current_term_id', 'current_term_name'
+        ]
+        read_only_fields = ['id']
+
+
+class ParentSerializer(serializers.ModelSerializer):
+    """Serializer for Parent model"""
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    student_name = serializers.CharField(source='student.student.get_full_name', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = Parent
+        fields = [
+            'id', 'user_id', 'username', 'student', 'student_name',
+            'first_name', 'last_name', 'phone', 'email', 'relation_ship'
+        ]
+        read_only_fields = ['id']
+
+
+# ====================
+# Dashboard & Other Serializers
+# ====================
 
 class DashboardStatsSerializer(serializers.Serializer):
     total_users = serializers.IntegerField()
@@ -392,3 +478,59 @@ class UserFilterSerializer(serializers.Serializer):
     first_login = serializers.CharField(required=False)
     page = serializers.IntegerField(default=1, min_value=1)
     per_page = serializers.IntegerField(default=10, min_value=1, max_value=100)
+
+class UserSessionSerializer(serializers.Serializer):
+    id = serializers.CharField(source='session_key')
+    session_key = serializers.CharField()
+    device = serializers.CharField(required=False)
+    browser = serializers.CharField(required=False)
+    os = serializers.CharField(required=False)
+    location = serializers.CharField(default='Unknown')
+    ip = serializers.CharField(required=False)
+    expire_date = serializers.DateTimeField()
+    current = serializers.BooleanField(default=False)
+
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        if not User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError(_("No user found with this email address."))
+        return value
+
+class VerifyOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
+
+class ResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
+    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    confirm_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+
+    def validate(self, data):
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError({"confirm_password": _("Passwords do not match.")})
+        try:
+            validate_password(data['password'])
+        except ValidationError as e:
+            raise serializers.ValidationError({"password": list(e.messages)})
+        return data
+
+
+# Activity Serializer
+class ActivitySerializer(serializers.ModelSerializer):
+    activity_label = serializers.CharField(source='get_activity_type_display', read_only=True)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    
+    class Meta:
+        model = Activity
+        fields = [
+            'id', 'activity_type', 'activity_label', 'description', 'device', 
+            'browser', 'os', 'ip_address', 'location', 'status', 'status_label',
+            'timestamp', 'metadata'
+        ]
+        read_only_fields = fields
+

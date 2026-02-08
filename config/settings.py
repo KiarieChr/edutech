@@ -28,7 +28,7 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0', '192.168.100.27']
+ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0', '192.168.100.27','192.168.100.29']
 
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
@@ -55,6 +55,7 @@ THIRD_PARTY_APPS = [
     "crispy_bootstrap5",
     "django_filters",
     'rest_framework',
+    'rest_framework.authtoken',
     'corsheaders',
 ]
 
@@ -68,6 +69,17 @@ PROJECT_APPS = [
     "quiz.apps.QuizConfig",
     "payments.apps.PaymentsConfig",
     "workforce.apps.WorkforceConfig",
+    "recruitment.apps.RecruitmentConfig",
+    "student_settings.apps.StudentSettingsConfig",
+    "student_management.apps.StudentManagementConfig",
+    "finance.apps.FinanceConfig",
+    "fees.apps.FeesConfig",
+    "journals.apps.JournalsConfig",
+    "invoicing.apps.InvoicingConfig",
+    "payables.apps.PayablesConfig",
+    "budgets.apps.BudgetsConfig",
+    "finance_reports.apps.FinanceReportsConfig",
+    "academics.apps.AcademicsConfig",
 ]
 
 # Combine all apps
@@ -116,7 +128,6 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.TokenAuthentication',
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -180,7 +191,21 @@ DATABASES = {
     }
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
 
 # https://docs.djangoproject.com/en/stable/ref/settings/#std:setting-DEFAULT_AUTO_FIELD
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -188,7 +213,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Password validation
 # https://docs.djangoproject.com/en/2.2/ref/settings/#auth-password-validators
 
-AUAUTH_PASSWORD_VALIDATORS = [
+AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
     },
@@ -271,7 +296,9 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'oqzfbwkeijsrewvc')
-EMAIL_FROM_ADDRESS = os.getenv('EMAIL_FROM_ADDRESS', 'ROYAL EDU PLUS ')
+EMAIL_FROM_ADDRESS = os.getenv('EMAIL_FROM_ADDRESS', 'FAHARI ACADEMIA MIS <mbuguajames467@gmail.com>')
+DEFAULT_FROM_EMAIL = EMAIL_FROM_ADDRESS
+
 
 WSGI_APPLICATION = 'config.wsgi.application'
 AUTH_USER_MODEL = 'accounts.User'
@@ -281,7 +308,9 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'mbuguajames467@gmail.com'
 EMAIL_HOST_PASSWORD = 'oqzfbwkeijsrewvc'
-EMAIL_FROM_ADDRESS = 'ROYAL EDU PLUS'
+EMAIL_FROM_ADDRESS = 'FAHARI ACADEMIA MIS <mbuguajames467@gmail.com>'
+DEFAULT_FROM_EMAIL = EMAIL_FROM_ADDRESS
+
 
 # crispy config
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
@@ -295,64 +324,10 @@ LOGIN_URL = '/accounts/auth/login/'
 STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY", default="")
 STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY", default="")
 
-# LOGGING
-# ------------------------------------------------------------------------------
-# https://docs.djangoproject.com/en/dev/ref/settings/#logging
-# See https://docs.djangoproject.com/en/dev/topics/logging for
-# more details on how to customize your logging configuration.
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": "%(levelname)s %(asctime)s %(module)s "
-            "%(process)d %(thread)d %(message)s"
-        }
-    },
-    "handlers": {
-        "console": {
-            "level": "DEBUG",
-            "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        }
-    },
-    "root": {"level": "INFO", "handlers": ["console"]},
-}
 
 # WhiteNoise configuration
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-STUDENT_ID_PREFIX = config("STUDENT_ID_PREFIX", "ugr")
-LECTURER_ID_PREFIX = config("LECTURER_ID_PREFIX", "lec")
-
-
-# Constants
-YEARS = (
-    (1, "1"),
-    (2, "2"),
-    (3, "3"),
-    (4, "4"),
-    (5, "5"),
-    (6, "6"),
-)
-
-BACHELOR_DEGREE = "Bachelor"
-MASTER_DEGREE = "Master"
-
-LEVEL_CHOICES = (
-    (BACHELOR_DEGREE, _("Bachelor Degree")),
-    (MASTER_DEGREE, _("Master Degree")),
-)
-
-FIRST = "First"
-SECOND = "Second"
-THIRD = "Third"
-
-SEMESTER_CHOICES = (
-    (FIRST, _("First")),
-    (SECOND, _("Second")),
-    (THIRD, _("Third")),
-)
 
 # CORS Configuration
 if ENVIRONMENT == 'production':
@@ -375,8 +350,9 @@ else:  # development
         "http://127.0.0.1:8000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "http://localhost:8000",
+        "http://192.168.100.29:5173",
     ]
+    CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
     # For development convenience
     CORS_ALLOW_ALL_ORIGINS = True
     CORS_ORIGIN_ALLOW_ALL = True
@@ -409,14 +385,19 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # Session settings (important for authentication)
-SESSION_COOKIE_SAMESITE = 'Lax' if ENVIRONMENT == 'production' else 'None'
+SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SECURE = ENVIRONMENT == 'production'
 SESSION_COOKIE_HTTPONLY = True
 
 # CSRF settings
-CSRF_COOKIE_SAMESITE = 'Lax' if ENVIRONMENT == 'production' else 'None'
+CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SECURE = ENVIRONMENT == 'production'
-CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False  # Allow JS to read CSRF token if needed, or keeping True requires an endpoint to fetch it.
+# Ideally CSRF_COOKIE_HTTPONLY should be False so JS can read it for X-CSRFToken header, 
+# OR we rely on a specific view to set the cookie. Django default is False.
+# Users settings had True line 419: CSRF_COOKIE_HTTPONLY = True
+# If True, JS cannot read it to set the header. JS needs to read it.
+# wait, 'getCookie' in api.js needs to read it. So it MUST be False.
 
 # If you want to disable CSRF for API (not recommended)
 # CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS  # Already set above
@@ -431,3 +412,4 @@ if ENVIRONMENT == 'production':
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = True
     SECURE_REDIRECT_EXEMPT = []
+

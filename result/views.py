@@ -56,7 +56,7 @@ def add_score(request):
     # semester=current_semester)
     courses = Course.objects.filter(
         allocated_course__lecturer__pk=request.user.id
-    ).filter(semester=current_semester)
+    )
     context = {
         "current_session": current_session,
         "current_semester": current_semester,
@@ -79,7 +79,7 @@ def add_score_for(request, id):
     if request.method == "GET":
         courses = Course.objects.filter(
             allocated_course__lecturer__pk=request.user.id
-        ).filter(semester=current_semester)
+        )
         course = Course.objects.get(pk=id)
         # myclass = Class.objects.get(lecturer__pk=request.user.id)
         # myclass = get_object_or_404(Class, lecturer__pk=request.user.id)
@@ -94,7 +94,6 @@ def add_score_for(request, id):
                 course__allocated_course__lecturer__pk=request.user.id
             )
             .filter(course__id=id)
-            .filter(course__semester=current_semester)
         )
         context = {
             "title": "Submit Score",
@@ -123,9 +122,7 @@ def add_score_for(request, id):
             # print(student.student)
             # print(student.student.program.id)
             courses = (
-                Course.objects.filter(level=student.student.level)
-                .filter(program__pk=student.student.program.id)
-                .filter(semester=current_semester)
+                Course.objects.filter(program__pk=student.student.program.id)
             )  # all courses of a specific level in current semester
             total_credit_in_semester = 0
             for i in courses:
@@ -166,9 +163,7 @@ def add_score_for(request, id):
             try:
                 a = Result.objects.get(
                     student=student.student,
-                    semester=current_semester,
                     session=current_session,
-                    level=student.student.level,
                 )
                 a.gpa = gpa
                 a.cgpa = cgpa
@@ -177,9 +172,7 @@ def add_score_for(request, id):
                 Result.objects.get_or_create(
                     student=student.student,
                     gpa=gpa,
-                    semester=current_semester,
                     session=current_session,
-                    level=student.student.level,
                 )
 
             # try:
@@ -204,9 +197,7 @@ def add_score_for(request, id):
 @student_required
 def grade_result(request):
     student = Student.objects.get(student__pk=request.user.id)
-    courses = TakenCourse.objects.filter(student__student__pk=request.user.id).filter(
-        course__level=student.level
-    )
+    courses = TakenCourse.objects.filter(student__student__pk=request.user.id)
     # total_credit_in_semester = 0
     results = Result.objects.filter(student__student__pk=request.user.id)
 
@@ -229,12 +220,9 @@ def grade_result(request):
     # previousLEVEL = 0
     # calculate_cgpa
     for i in results:
-        previousLEVEL = i.level
         try:
             a = Result.objects.get(
                 student__student__pk=request.user.id,
-                level=previousLEVEL,
-                semester="Second",
             )
             previousCGPA = a.cgpa
             break
@@ -261,7 +249,7 @@ def grade_result(request):
 def assessment_result(request):
     student = Student.objects.get(student__pk=request.user.id)
     courses = TakenCourse.objects.filter(
-        student__student__pk=request.user.id, course__level=student.level
+        student__student__pk=request.user.id
     )
     result = Result.objects.filter(student__student__pk=request.user.id)
 
@@ -361,8 +349,7 @@ def result_sheet_pdf_view(request, id):
     normal.fontName = "Helvetica"
     normal.fontSize = 10
     normal.leading = 15
-    level = result.filter(course_id=id).first()
-    title = "<b>Level: </b>" + str(level.course.level)
+    title = "<b>Level: </b>" + student.level
     title = Paragraph(title.upper(), normal)
     Story.append(title)
     Story.append(Spacer(1, 0.6 * inch))
@@ -520,13 +507,13 @@ def course_registration_form(request):
             )
         ],
         [
-            Paragraph(
-                "<b>Session : " + current_session.session.upper() + "</b>",
-                styles["Normal"],
-            ),
-            Paragraph("<b>Level: " + student.level + "</b>", styles["Normal"]),
+            Paragraph("<b>Session : " + current_session.session.upper() + "</b>", styles["Normal"]),
+            Paragraph("<b>Level: </b>", styles["Normal"]),
         ],
     ]
+    # Removed student.level since it's now a choice field in Student model and might not match course
+    # Actually student.level still exists. Let's keep it if it's in Student model.
+
     tbl = Table(tbl_data)
     Story.append(tbl)
     Story.append(Spacer(1, 0.6 * inch))
@@ -576,7 +563,7 @@ def course_registration_form(request):
 
     first_semester_unit = 0
     for course in courses:
-        if course.course.semester == settings.FIRST:
+        # if course.course.semester == settings.FIRST: # Removed semester check
             first_semester_unit += int(course.course.credit)
             data = [
                 (
@@ -665,7 +652,7 @@ def course_registration_form(request):
 
     second_semester_unit = 0
     for course in courses:
-        if course.course.semester == settings.SECOND:
+        # if course.course.semester == settings.SECOND: # Removed semester check
             second_semester_unit += int(course.course.credit)
             data = [
                 (

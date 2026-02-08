@@ -162,21 +162,7 @@ class User(AbstractUser):
     def __str__(self):
         return "{} ({})".format(self.username, self.get_full_name)
     
-    @property
-    def get_user_role(self):
-        if self.is_superuser:
-            role = _("Admin")
-        elif self.is_student:
-            role = _("Student")
-        elif self.is_lecturer:
-            role = _("Lecturer")
-        elif self.is_parent:
-            role = _("Parent")
-        elif self.is_dep_head:
-            role = _("Department Head")
-        else:
-            role = _("User")
-        return role
+    
     
     def get_picture(self):
         try:
@@ -232,11 +218,44 @@ class StudentManager(models.Manager):
         return qs
 
 
+
 class Student(models.Model):
+    STATUS_CHOICES = (
+        ('active', 'Active'),
+        ('alumni', 'Alumni'),
+        ('suspended', 'Suspended'),
+        ('expelled', 'Expelled'),
+        ('transferred', 'Transferred'),
+        ('withdrawn', 'Withdrawn'),
+    )
+
     student = models.OneToOneField(User, on_delete=models.CASCADE)
-    # id_number = models.CharField(max_length=20, unique=True, blank=True)
-    level = models.CharField(max_length=25, choices=LEVEL, null=True)
-    program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
+    
+    # Identity & Demographics
+    admission_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    nationality = models.CharField(max_length=100, null=True, blank=True)
+    religion = models.CharField(max_length=50, null=True, blank=True)
+    
+    # Intake/Cohort tracking - tracks which cohort the student belongs to
+    intake = models.ForeignKey(
+        'student_settings.Intake',
+        on_delete=models.PROTECT,
+        related_name='students',
+        null=True,
+        blank=True,
+        help_text='The intake cohort this student belongs to'
+    )
+    admission_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Date when student was admitted to the school'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='active'
+    )
 
     objects = StudentManager()
 
@@ -244,8 +263,8 @@ class Student(models.Model):
         ordering = ("-student__date_joined",)
 
     def __str__(self):
-        return self.student.get_full_name
-
+        return f"{self.student.get_full_name} ({self.admission_number})"
+    
     @classmethod
     def get_gender_count(cls):
         males_count = Student.objects.filter(student__gender="M").count()
@@ -259,6 +278,46 @@ class Student(models.Model):
     def delete(self, *args, **kwargs):
         self.student.delete()
         super().delete(*args, **kwargs)
+    
+    @property
+    def current_enrollment(self):
+        """Get the student's current active enrollment"""
+        from student_settings.models import Enrollment
+        return Enrollment.objects.filter(
+            student=self,
+            is_active=True,
+            is_deleted=False
+        ).order_by('-academic_year__start_date', '-term__start_date').first()
+    
+    @property
+    def current_grade(self):
+        """Get the student's current grade/class"""
+        enrollment = self.current_enrollment
+        if enrollment and enrollment.grade and not enrollment.grade.is_deleted:
+            return enrollment.grade
+        # Fallback to intake entry grade for new students
+        if self.intake and self.intake.entry_grade and not self.intake.entry_grade.is_deleted:
+            return self.intake.entry_grade
+        return None
+    
+    @property
+    def current_stream(self):
+        """Get the student's current stream"""
+        enrollment = self.current_enrollment
+        return enrollment.stream if enrollment else None
+    
+    @property
+    def current_academic_year(self):
+        """Get the student's current academic year"""
+        enrollment = self.current_enrollment
+        return enrollment.academic_year if enrollment else None
+    
+    @property
+    def current_term(self):
+        """Get the student's current term"""
+        enrollment = self.current_enrollment
+        return enrollment.term if enrollment else None
+
 
 
 class Parent(models.Model):
@@ -294,3 +353,119 @@ class DepartmentHead(models.Model):
 
     def __str__(self):
         return "{}".format(self.user)
+
+class OTP(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otps')
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"OTP for {self.user.username} - {self.code}"
+
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+
+# Activity tracking for user actions
+class Activity(models.Model):
+    """
+    Track user activities like login, password changes, profile updates, etc.
+    Useful for security auditing and activity logging.
+    """
+    ACTIVITY_TYPES = [
+        ('login', 'Login'),
+        ('logout', 'Logout'),
+        ('password_change', 'Password Change'),
+        ('profile_update', 'Profile Update'),
+        ('avatar_upload', 'Avatar Upload'),
+        ('session_terminate', 'Session Terminated'),
+        ('permission_change', 'Permission Change'),
+        ('failed_login', 'Failed Login Attempt'),
+        ('email_verification', 'Email Verified'),
+        ('account_locked', 'Account Locked'),
+        ('account_unlocked', 'Account Unlocked'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('pending', 'Pending'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='activities')
+    activity_type = models.CharField(max_length=50, choices=ACTIVITY_TYPES)
+    description = models.CharField(max_length=255, blank=True)
+    device = models.CharField(max_length=100, blank=True, null=True)
+    browser = models.CharField(max_length=100, blank=True, null=True)
+    os = models.CharField(max_length=100, blank=True, null=True)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+    location = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='success')
+    user_agent = models.TextField(blank=True, null=True)
+    metadata = models.JSONField(default=dict, blank=True)  # Extra data as JSON
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['user', '-timestamp']),
+            models.Index(fields=['activity_type', '-timestamp']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.activity_type} - {self.timestamp}"
+
+    @classmethod
+    def log_activity(cls, user, activity_type, request=None, description='', status='success', **kwargs):
+        """
+        Helper method to log user activities
+        """
+        import user_agents
+        from django.utils import timezone
+        
+        device = ''
+        browser = ''
+        os = ''
+        ip_address = ''
+        user_agent_string = ''
+        
+        if request:
+            # Get IP address
+            ip_address = cls.get_client_ip(request)
+            
+            # Parse user agent
+            user_agent_string = request.META.get('HTTP_USER_AGENT', '')
+            ua = user_agents.parse(user_agent_string)
+            device = ua.device.family if ua else 'Unknown'
+            browser = f"{ua.browser.family} {ua.browser.version_string}" if ua else 'Unknown'
+            os = f"{ua.os.family} {ua.os.version_string}" if ua else 'Unknown'
+        
+        activity = cls(
+            user=user,
+            activity_type=activity_type,
+            description=description,
+            device=device,
+            browser=browser,
+            os=os,
+            ip_address=ip_address,
+            user_agent=user_agent_string,
+            status=status,
+            metadata=kwargs
+        )
+        activity.save()
+        return activity
+
+    @staticmethod
+    def get_client_ip(request):
+        """Get client IP address from request"""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
+
+

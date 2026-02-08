@@ -4,9 +4,10 @@ Part 2: API ViewSets with Custom Actions
 """
 
 from rest_framework import viewsets, status, filters
+import rest_framework.parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
@@ -23,6 +24,20 @@ from .permissions import *
 # CORE VIEWSETS
 # ============================================================================
 
+class CampusSerializer(serializers.ModelSerializer):
+    """Campus serializer"""
+    class Meta:
+        model = Campus
+        fields = '__all__'
+
+
+class CampusViewSet(viewsets.ModelViewSet):
+    """Campus ViewSet"""
+    queryset = Campus.objects.all()
+    serializer_class = CampusSerializer
+    permission_classes = [AllowAny]
+
+
 class EmployeeViewSet(viewsets.ModelViewSet):
     """
     Employee ViewSet with custom actions
@@ -30,15 +45,15 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.select_related(
         'department', 'job_grade'
     ).prefetch_related('addresses', 'emergency_contacts')
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = [
         'employment_status', 'employee_category', 
-        'department', 'gender'
+        'department', 'gender', 'job_assignments__job_title'
     ]
     search_fields = [
         'employee_no', 'first_name', 'last_name', 
-        'national_id', 'email'
+        'national_id', 'official_email', 'personal_email'
     ]
     ordering_fields = ['employee_no', 'hire_date', 'first_name']
     ordering = ['employee_no']
@@ -113,6 +128,18 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         total = Employee.objects.count()
         active = Employee.objects.filter(employment_status='active').count()
         
+        # Calculate specific category counts
+        teaching_staff = Employee.objects.filter(employee_category='teaching').count()
+        non_teaching_staff = Employee.objects.filter(employee_category='non_teaching').count()
+        
+        # Calculate employees currently on leave
+        today = timezone.now().date()
+        on_leave = LeaveApplication.objects.filter(
+            status='approved',
+            start_date__lte=today,
+            end_date__gte=today
+        ).count()
+        
         by_category = Employee.objects.values(
             'employee_category'
         ).annotate(count=Count('id'))
@@ -124,11 +151,127 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         stats = {
             'total_employees': total,
             'active_employees': active,
+            'teaching_staff': teaching_staff,
+            'non_teaching_staff': non_teaching_staff,
+            'on_leave': on_leave,
             'by_category': list(by_category),
             'top_departments': list(by_department)
         }
         
         return Response(stats)
+
+    @action(detail=False, methods=['post'], parser_classes=[rest_framework.parsers.MultiPartParser])
+    def import_data(self, request):
+        """Import employees from Excel file"""
+        if 'file' not in request.FILES:
+            return Response(
+                {'error': 'No file uploaded'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        file = request.FILES['file']
+        if not file.name.endswith('.xlsx'):
+            return Response(
+                {'error': 'Invalid file format. Please upload .xlsx file'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file)
+            sheet = wb.active
+            
+            headers = [cell.value for cell in sheet[1]]
+            required_headers = ['Employee No', 'First Name', 'Last Name', 'Email', 'Department', 'Job Title']
+            
+            missing = [h for h in required_headers if h not in headers]
+            if missing:
+                return Response(
+                    {'error': f'Missing headers: {", ".join(missing)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            success_count = 0
+            errors = []
+            
+            # Helper to get col index
+            def get_col_val(row, header_name):
+                try:
+                    idx = headers.index(header_name)
+                    return row[idx].value
+                except (ValueError, IndexError):
+                    return None
+
+            for row_idx, row in enumerate(sheet.iter_rows(min_row=2), start=2):
+                try:
+                    emp_no = get_col_val(row, 'Employee No')
+                    if not emp_no: continue
+
+                    email = get_col_val(row, 'Email')
+                    first_name = get_col_val(row, 'First Name')
+                    last_name = get_col_val(row, 'Last Name')
+                    dept_name = get_col_val(row, 'Department')
+                    job_title_name = get_col_val(row, 'Job Title')
+                    phone = get_col_val(row, 'Phone')
+                    
+                    if Employee.objects.filter(employee_no=emp_no).exists():
+                         errors.append(f"Row {row_idx}: Employee {emp_no} already exists")
+                         continue
+
+                    # Get or create department
+                    department = None
+                    if dept_name:
+                        department = Department.objects.filter(name__iexact=dept_name).first()
+                        if not department:
+                             # Fallback or error? For now, skip or set null.
+                             pass 
+                    
+                    # Create employee
+                    employee = Employee.objects.create(
+                        employee_no=str(emp_no),
+                        first_name=first_name,
+                        last_name=last_name,
+                        official_email=email,
+                        personal_email=email, # Default
+                        phone_primary=phone or '',
+                        department=department,
+                        hire_date=timezone.now().date(),
+                        date_of_birth='1990-01-01', # Default
+                        gender='male', # Default
+                        employee_category='teaching', # Default
+                        employment_status='active',
+                        payroll_type='monthly'
+                    )
+                    
+                    # Assign Job Title
+                    if job_title_name:
+                        job_title = JobTitle.objects.filter(title__iexact=job_title_name).first()
+                        if job_title:
+                            EmployeeJobAssignment.objects.create(
+                                employee=employee,
+                                job_title=job_title,
+                                department=department or employee.department, # Fallback
+                                effective_from=timezone.now().date(),
+                                is_primary_assignment=True,
+                                employment_type='full_time',
+                                assignment_type='permanent'
+                            )
+                    
+                    success_count += 1
+                    
+                except Exception as e:
+                    errors.append(f"Row {row_idx}: {str(e)}")
+
+            return Response({
+                'message': f'Successfully imported {success_count} employees',
+                'errors': errors
+            })
+
+        except Exception as e:
+             return Response(
+                {'error': f'Failed to process file: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):
@@ -137,7 +280,7 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         'faculty', 'campus', 'head_of_department'
     )
     serializer_class = DepartmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['department_type', 'campus', 'faculty']
     search_fields = ['code', 'name']
@@ -181,6 +324,23 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         }
         
         return Response(summary)
+
+
+class JobTitleViewSet(viewsets.ModelViewSet):
+    """Job Title ViewSet"""
+    queryset = JobTitle.objects.select_related('job_grade')
+    serializer_class = JobTitleSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['title', 'code']
+
+
+class JobGradeViewSet(viewsets.ModelViewSet):
+    """Job Grade ViewSet"""
+    queryset = JobGrade.objects.all()
+    serializer_class = JobGradeSerializer
+    permission_classes = [IsAuthenticated]
+
 
 
 # ============================================================================

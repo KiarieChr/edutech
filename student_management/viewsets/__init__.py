@@ -1,0 +1,3 @@
+from .application_viewset import ApplicationViewSet
+from .admission_viewset import AdmissionViewSet
+from .class_session_viewset import StudentPlacementViewSet

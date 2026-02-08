@@ -66,7 +66,7 @@ def program_add(request):
 @login_required
 def program_detail(request, pk):
     program = get_object_or_404(Program, pk=pk)
-    courses = Course.objects.filter(program_id=pk).order_by("-year")
+    courses = Course.objects.filter(program_id=pk)
     credits = courses.aggregate(total_credits=Sum("credit"))
     paginator = Paginator(courses, 10)
     page = request.GET.get("page")
@@ -419,20 +419,17 @@ def course_registration(request):
         courses = (
             Course.objects.filter(
                 program__pk=student.program.id,
-                level=student.level,
-                semester=current_semester,
             )
             .exclude(id__in=t)
-            .order_by("year")
         )
         all_courses = Course.objects.filter(
-            level=student.level, program__pk=student.program.id
+            program__pk=student.program.id
         )
 
         no_course_is_registered = False  # Check if no course is registered
         all_courses_are_registered = False
 
-        registered_courses = Course.objects.filter(level=student.level).filter(id__in=t)
+        registered_courses = Course.objects.filter(id__in=t)
         if (
             registered_courses.count() == 0
         ):  # Check if number of registered courses is 0
@@ -445,10 +442,7 @@ def course_registration(request):
         total_sec_semester_credit = 0
         total_registered_credit = 0
         for i in courses:
-            if i.semester == "First":
-                total_first_semester_credit += int(i.credit)
-            if i.semester == "Second":
-                total_sec_semester_credit += int(i.credit)
+            total_registered_credit += int(i.credit)
         for i in registered_courses:
             total_registered_credit += int(i.credit)
         context = {
@@ -457,8 +451,6 @@ def course_registration(request):
             "no_course_is_registered": no_course_is_registered,
             "current_semester": current_semester,
             "courses": courses,
-            "total_first_semester_credit": total_first_semester_credit,
-            "total_sec_semester_credit": total_sec_semester_credit,
             "registered_courses": registered_courses,
             "total_registered_credit": total_registered_credit,
             "student": student,

@@ -11,6 +11,9 @@ router = DefaultRouter()
 # Core
 router.register(r'employees', EmployeeViewSet, basename='employee')
 router.register(r'departments', DepartmentViewSet, basename='department')
+router.register(r'campuses', CampusViewSet, basename='campus')
+router.register(r'job-titles', JobTitleViewSet, basename='job-title')
+router.register(r'job-grades', JobGradeViewSet, basename='job-grade')
 
 # Attendance
 router.register(r'attendance', AttendanceRecordViewSet, basename='attendance')

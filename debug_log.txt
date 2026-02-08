@@ -1,0 +1,52 @@
+Checking 4 intakes...
+
+--- Intake: 2027 INTAKE (ID: 2) ---
+Start Year: 2027, Start Grade: Grade 1 (COMPETENCY BASED CURRICULUM), Curriculum: COMPETENCY BASED CURRICULUM
+Found 3 future/current years.
+Found 6 future/current grades.
+Progression Map Size: 3
+ERROR: Inconsistency! Need 3 more years.
+  Year 2027 -> Grade Grade 1 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2028 -> Grade Grade 2 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2029 -> Grade Grade 3 (COMPETENCY BASED CURRICULUM): Found 0 terms.
+  ERROR: No terms for year 2029!
+
+--- Intake: 2026 intake (ID: 1) ---
+Start Year: 2026, Start Grade: Grade 1 (COMPETENCY BASED CURRICULUM), Curriculum: COMPETENCY BASED CURRICULUM
+Found 4 future/current years.
+Found 6 future/current grades.
+Progression Map Size: 4
+ERROR: Inconsistency! Need 2 more years.
+  Year 2026 -> Grade Grade 1 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2027 -> Grade Grade 2 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2028 -> Grade Grade 3 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2029 -> Grade Grade 4 (COMPETENCY BASED CURRICULUM): Found 0 terms.
+  ERROR: No terms for year 2029!
+
+--- Intake: Class of 2024 (ID: 3) ---
+Start Year: 2024, Start Grade: Grade 1 (COMPETENCY BASED CURRICULUM), Curriculum: COMPETENCY BASED CURRICULUM
+Found 6 future/current years.
+Found 6 future/current grades.
+Progression Map Size: 6
+  Year 2024 -> Grade Grade 1 (COMPETENCY BASED CURRICULUM): Found 1 terms.
+  Year 2025 -> Grade Grade 2 (COMPETENCY BASED CURRICULUM): Found 0 terms.
+  ERROR: No terms for year 2025!
+  Year 2026 -> Grade Grade 3 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2027 -> Grade Grade 4 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2028 -> Grade Grade 5 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2029 -> Grade Grade 6 (COMPETENCY BASED CURRICULUM): Found 0 terms.
+  ERROR: No terms for year 2029!
+
+--- Intake: 2023 Intake (ID: 4) ---
+Start Year: 2023, Start Grade: Grade 1 (COMPETENCY BASED CURRICULUM), Curriculum: COMPETENCY BASED CURRICULUM
+Found 7 future/current years.
+Found 6 future/current grades.
+Progression Map Size: 6
+  Year 2023 -> Grade Grade 1 (COMPETENCY BASED CURRICULUM): Found 0 terms.
+  ERROR: No terms for year 2023!
+  Year 2024 -> Grade Grade 2 (COMPETENCY BASED CURRICULUM): Found 1 terms.
+  Year 2025 -> Grade Grade 3 (COMPETENCY BASED CURRICULUM): Found 0 terms.
+  ERROR: No terms for year 2025!
+  Year 2026 -> Grade Grade 4 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2027 -> Grade Grade 5 (COMPETENCY BASED CURRICULUM): Found 3 terms.
+  Year 2028 -> Grade Grade 6 (COMPETENCY BASED CURRICULUM): Found 3 terms.

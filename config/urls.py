@@ -1,3 +1,4 @@
+import rest_framework
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
@@ -11,7 +12,19 @@ admin.site.site_header = "SkyLearn Admin"
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("i18n/", include("django.conf.urls.i18n")),
+    path('api/settings/', include('student_settings.urls')),
+    path('api/recruitment/', include('recruitment.urls')),
+    path('api/student-management/', include('student_management.urls')),
     path('api/', include('accounts.api_urls')),
+    path('api/finance/', include('finance.urls')),
+    path('api/journals/', include('journals.urls')),
+    path('api/finance-reports/', include('finance_reports.urls')),
+    path('api/invoicing/', include('invoicing.urls')),
+    path('api/payables/', include('payables.urls')),
+    path('api/fees/', include('fees.urls')),
+    path('api/academics/', include('academics.urls')),
+    path('workforce/', include('workforce.api_urls')),
+    #path('api/auth/', rest_framework.urls)
 ]
 
 urlpatterns += i18n_patterns(

@@ -11,6 +11,7 @@ router = DefaultRouter()
 # Core
 router.register(r'employees', EmployeeViewSet, basename='employee')
 router.register(r'departments', DepartmentViewSet, basename='department')
+router.register(r'campuses', CampusViewSet, basename='campus')
 
 # Attendance
 router.register(r'attendance', AttendanceRecordViewSet, basename='attendance')
@@ -25,6 +26,7 @@ router.register(r'payroll-periods', PayrollPeriodViewSet, basename='payroll-peri
 router.register(r'payroll-calculations', PayrollCalculationViewSet, basename='payroll-calculation')
 router.register(r'payslips', PayslipViewSet, basename='payslip')
 
+app_name = 'hr_payroll'
 
 
 urlpatterns = [
