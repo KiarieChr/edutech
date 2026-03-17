@@ -790,3 +790,320 @@ class PayslipSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payslip
         fields = '__all__'
+
+
+# ============================================================================
+# HRMS ENHANCEMENT SERIALIZERS
+# ============================================================================
+
+from .models import (
+    Position, EmployeeLifecycleLog, BulkImportSession,
+    BulkImportRecord, EmployeeDocument, HRAutomationRule,
+    HRAutomationLog, HRNotificationPreference,
+)
+
+
+class PositionSerializer(serializers.ModelSerializer):
+    """Position serializer for headcount management"""
+    department_name = serializers.CharField(
+        source='department.name', 
+        read_only=True
+    )
+    job_title_name = serializers.CharField(
+        source='job_title.title', 
+        read_only=True
+    )
+    job_grade_name = serializers.CharField(
+        source='job_grade.name', 
+        read_only=True
+    )
+    current_holder_name = serializers.CharField(
+        source='current_holder.get_full_name', 
+        read_only=True
+    )
+    reports_to_position_code = serializers.CharField(
+        source='reports_to_position.position_code', 
+        read_only=True
+    )
+    vacancy_status_display = serializers.CharField(
+        source='get_vacancy_status_display', 
+        read_only=True
+    )
+    funding_status_display = serializers.CharField(
+        source='get_funding_status_display', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = Position
+        fields = '__all__'
+        read_only_fields = ['position_code', 'created_at', 'updated_at']
+
+
+class PositionListSerializer(serializers.ModelSerializer):
+    """Lightweight position serializer for lists"""
+    department_name = serializers.CharField(
+        source='department.name', 
+        read_only=True
+    )
+    job_title_name = serializers.CharField(
+        source='job_title.title', 
+        read_only=True
+    )
+    current_holder_name = serializers.CharField(
+        source='current_holder.get_full_name', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = Position
+        fields = [
+            'id', 'position_code', 'position_name', 'department_name',
+            'job_title_name', 'vacancy_status', 'funding_status',
+            'current_holder_name', 'is_active'
+        ]
+
+
+class EmployeeLifecycleLogSerializer(serializers.ModelSerializer):
+    """Employee lifecycle audit log serializer"""
+    employee_name = serializers.CharField(
+        source='employee.get_full_name', 
+        read_only=True
+    )
+    employee_no = serializers.CharField(
+        source='employee.employee_no', 
+        read_only=True
+    )
+    performed_by_name = serializers.CharField(
+        source='performed_by.get_full_name', 
+        read_only=True
+    )
+    event_type_display = serializers.CharField(
+        source='get_event_type_display', 
+        read_only=True
+    )
+    old_department_name = serializers.CharField(
+        source='old_department.name', 
+        read_only=True
+    )
+    new_department_name = serializers.CharField(
+        source='new_department.name', 
+        read_only=True
+    )
+    old_job_title_name = serializers.CharField(
+        source='old_job_title.title', 
+        read_only=True
+    )
+    new_job_title_name = serializers.CharField(
+        source='new_job_title.title', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = EmployeeLifecycleLog
+        fields = '__all__'
+        read_only_fields = ['created_at']
+
+
+class BulkImportSessionSerializer(serializers.ModelSerializer):
+    """Bulk import session serializer"""
+    uploaded_by_name = serializers.CharField(
+        source='uploaded_by.get_full_name', 
+        read_only=True
+    )
+    status_display = serializers.CharField(
+        source='get_status_display', 
+        read_only=True
+    )
+    import_type_display = serializers.CharField(
+        source='get_import_type_display', 
+        read_only=True
+    )
+    progress_percentage = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = BulkImportSession
+        fields = '__all__'
+        read_only_fields = [
+            'status', 'total_records', 'valid_records', 
+            'invalid_records', 'processed_records', 
+            'validation_errors', 'created_at', 'completed_at'
+        ]
+    
+    def get_progress_percentage(self, obj):
+        if obj.total_records == 0:
+            return 0
+        return round((obj.processed_records / obj.total_records) * 100, 2)
+
+
+class BulkImportRecordSerializer(serializers.ModelSerializer):
+    """Bulk import record serializer"""
+    status_display = serializers.CharField(
+        source='get_status_display', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = BulkImportRecord
+        fields = '__all__'
+        read_only_fields = [
+            'status', 'errors', 'warnings', 
+            'processed_data', 'created_object_id'
+        ]
+
+
+class EmployeeDocumentSerializer(serializers.ModelSerializer):
+    """Employee document serializer"""
+    employee_name = serializers.CharField(
+        source='employee.get_full_name', 
+        read_only=True
+    )
+    employee_no = serializers.CharField(
+        source='employee.employee_no', 
+        read_only=True
+    )
+    uploaded_by_name = serializers.CharField(
+        source='uploaded_by.get_full_name', 
+        read_only=True
+    )
+    verified_by_name = serializers.CharField(
+        source='verified_by.get_full_name', 
+        read_only=True
+    )
+    category_display = serializers.CharField(
+        source='get_category_display', 
+        read_only=True
+    )
+    verification_status_display = serializers.CharField(
+        source='get_verification_status_display', 
+        read_only=True
+    )
+    is_expired = serializers.SerializerMethodField()
+    days_until_expiry = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = EmployeeDocument
+        fields = '__all__'
+        read_only_fields = [
+            'verification_status', 'verified_by', 'verified_at',
+            'rejection_reason', 'created_at', 'updated_at'
+        ]
+    
+    def get_is_expired(self, obj):
+        if not obj.expiry_date:
+            return False
+        from django.utils import timezone
+        return obj.expiry_date < timezone.now().date()
+    
+    def get_days_until_expiry(self, obj):
+        if not obj.expiry_date:
+            return None
+        from django.utils import timezone
+        delta = obj.expiry_date - timezone.now().date()
+        return delta.days
+
+
+class EmployeeDocumentUploadSerializer(serializers.ModelSerializer):
+    """Serializer for uploading employee documents"""
+    
+    class Meta:
+        model = EmployeeDocument
+        fields = [
+            'employee', 'category', 'document_name', 'document_file',
+            'document_number', 'issue_date', 'expiry_date', 
+            'issuing_authority', 'is_required', 'notes'
+        ]
+
+
+class HRAutomationRuleSerializer(serializers.ModelSerializer):
+    """HR automation rule serializer"""
+    trigger_type_display = serializers.CharField(
+        source='get_trigger_type_display', 
+        read_only=True
+    )
+    action_type_display = serializers.CharField(
+        source='get_action_type_display', 
+        read_only=True
+    )
+    created_by_name = serializers.CharField(
+        source='created_by.get_full_name', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = HRAutomationRule
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at', 'last_run_at']
+
+
+class HRAutomationLogSerializer(serializers.ModelSerializer):
+    """HR automation execution log serializer"""
+    rule_name = serializers.CharField(
+        source='rule.name', 
+        read_only=True
+    )
+    employee_name = serializers.CharField(
+        source='employee.get_full_name', 
+        read_only=True
+    )
+    status_display = serializers.CharField(
+        source='get_status_display', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = HRAutomationLog
+        fields = '__all__'
+
+
+class HRNotificationPreferenceSerializer(serializers.ModelSerializer):
+    """HR notification preference serializer"""
+    user_name = serializers.CharField(
+        source='user.get_full_name', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = HRNotificationPreference
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+# ============================================================================
+# ANALYTICS SERIALIZERS
+# ============================================================================
+
+class HeadcountAnalyticsSerializer(serializers.Serializer):
+    """Serializer for headcount analytics response"""
+    as_of_date = serializers.DateField()
+    total_headcount = serializers.IntegerField()
+    total_positions = serializers.IntegerField()
+    vacant_positions = serializers.IntegerField()
+    fill_rate = serializers.DecimalField(max_digits=5, decimal_places=2)
+    new_hires_this_month = serializers.IntegerField()
+    by_status = serializers.DictField()
+    by_category = serializers.DictField()
+    by_gender = serializers.DictField()
+    by_department = serializers.ListField()
+
+
+class TurnoverAnalyticsSerializer(serializers.Serializer):
+    """Serializer for turnover analytics response"""
+    period = serializers.DictField()
+    headcount = serializers.DictField()
+    new_hires = serializers.IntegerField()
+    separations = serializers.DictField()
+    turnover_rate = serializers.DecimalField(max_digits=5, decimal_places=2)
+    monthly_breakdown = serializers.ListField()
+    by_reason = serializers.DictField()
+
+
+class OrgChartNodeSerializer(serializers.Serializer):
+    """Serializer for org chart node"""
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    code = serializers.CharField(required=False)
+    type = serializers.CharField()
+    employee_count = serializers.IntegerField(required=False)
+    head = serializers.DictField(required=False)
+    children = serializers.ListField(required=False)

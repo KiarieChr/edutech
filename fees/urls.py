@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from fees.views import FeeStructureViewSet, FeeItemViewSet, FeeInvoiceViewSet, PaymentMethodViewSet, BillingViewSet
+from fees.views import FeeStructureViewSet, FeeItemViewSet, FeeInvoiceViewSet, PaymentMethodViewSet, BillingViewSet, fee_insights
 from .arrears_views import ArrearsViewSet
 from .receipt_views import ReceiptViewSet
 
@@ -15,4 +15,5 @@ router.register(r'receipts', ReceiptViewSet, basename='receipts')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('insights/', fee_insights, name='fee-insights'),
 ]

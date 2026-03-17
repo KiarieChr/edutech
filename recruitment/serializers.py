@@ -67,24 +67,31 @@ class JobOpeningListSerializer(serializers.ModelSerializer):
     hiring_manager = EmployeeSerializer(read_only=True)
     number_of_applications = serializers.SerializerMethodField()
     days_remaining = serializers.SerializerMethodField()
-    
+    is_open = serializers.SerializerMethodField()
+
     class Meta:
         model = JobOpening
         fields = (
             'id', 'reference_number', 'title', 'department', 'campus',
             'job_title', 'number_of_positions', 'opening_date', 'closing_date',
             'status', 'hiring_manager', 'number_of_applications', 'days_remaining',
-            'is_remote_allowed', 'min_salary', 'max_salary'
+            'is_open', 'is_remote_allowed', 'min_salary', 'max_salary'
         )
-    
+
     def get_number_of_applications(self, obj):
         return obj.applications.count()
-    
+
     def get_days_remaining(self, obj):
         if obj.closing_date:
             remaining = (obj.closing_date - timezone.now().date()).days
             return max(0, remaining)
         return None
+
+    def get_is_open(self, obj):
+        """True when no closing_date is set OR closing_date >= today."""
+        if obj.closing_date is None:
+            return True
+        return obj.closing_date >= timezone.now().date()
 
 
 class JobOpeningCreateSerializer(serializers.ModelSerializer):
@@ -167,12 +174,14 @@ class JobOpeningDetailSerializer(serializers.ModelSerializer):
     final_approver = EmployeeSerializer(read_only=True)
     requested_by = EmployeeSerializer(read_only=True)
     recruitment_sources = RecruitmentSourceSerializer(many=True, read_only=True)
-    
+
     # Statistics
     total_applications = serializers.SerializerMethodField()
     shortlisted_applications = serializers.SerializerMethodField()
     hired_applications = serializers.SerializerMethodField()
-    
+    is_open = serializers.SerializerMethodField()
+    days_remaining = serializers.SerializerMethodField()
+
     class Meta:
         model = JobOpening
         fields = '__all__'
@@ -193,6 +202,18 @@ class JobOpeningDetailSerializer(serializers.ModelSerializer):
         return obj.applications.filter(
             application_status=JobApplication.ApplicationStatus.HIRED
         ).count()
+
+    def get_is_open(self, obj):
+        """True when no closing_date is set OR closing_date >= today."""
+        if obj.closing_date is None:
+            return True
+        return obj.closing_date >= timezone.now().date()
+
+    def get_days_remaining(self, obj):
+        if obj.closing_date is None:
+            return None
+        remaining = (obj.closing_date - timezone.now().date()).days
+        return max(0, remaining)
 
 
 # ============================================================================

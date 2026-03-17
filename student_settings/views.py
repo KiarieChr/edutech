@@ -1,17 +1,19 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.utils import timezone
+from django.db.models import Count
 from .models import (
     AcademicYear, Term, Curriculum, GradeStructure, Stream,
     AdmissionConfig, StudentStatus, PromotionRule, DemographicConfig, SchoolCalendar, Intake,
-    CurriculumLevel
+    CurriculumLevel, LearningArea
 )
 from .serializers import (
     AcademicYearSerializer, TermSerializer, CurriculumSerializer,
     GradeStructureSerializer, StreamSerializer, AdmissionConfigSerializer,
     StudentStatusSerializer, PromotionRuleSerializer, DemographicConfigSerializer,
     SchoolCalendarSerializer, IntakeSerializer, IntakeCreateSerializer,
-    CurriculumLevelSerializer
+    CurriculumLevelSerializer, LearningAreaSerializer
 )
 
 class SoftDeleteViewSet(viewsets.ModelViewSet):
@@ -55,11 +57,133 @@ class TermViewSet(SoftDeleteViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
 
+
 class CurriculumViewSet(SoftDeleteViewSet):
+    """
+    ViewSet for Curriculum management with dashboard statistics.
+    """
     queryset = Curriculum.objects.all()
     serializer_class = CurriculumSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
+    
+    @action(detail=False, methods=['get'])
+    def dashboard_stats(self, request):
+        """
+        Aggregates statistics for the Curriculum Dashboard.
+        
+        Returns metrics on:
+        - Total and active curricula
+        - Total subjects
+        - Classes/grades covered
+        - Learning areas
+        - Subject distribution by curriculum
+        """
+        from timetable.models import Subject
+        
+        # 1. Curriculum Metrics
+        total_curricula = Curriculum.objects.filter(is_deleted=False).count()
+        active_curricula = Curriculum.objects.filter(is_deleted=False, status='active').count()
+        
+        # 2. Subject Metrics
+        total_subjects = Subject.objects.filter(is_active=True).count()
+        
+        # 3. Classes Covered
+        classes_covered = GradeStructure.objects.filter(is_deleted=False, is_active=True).count()
+        
+        # 4. Learning Areas
+        learning_areas_count = LearningArea.objects.filter(is_deleted=False, is_active=True).count()
+        
+        # 5. Subject Distribution by Curriculum (for chart)
+        subject_distribution = (
+            Subject.objects.filter(is_active=True)
+            .values('curriculum__name', 'curriculum__code')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        
+        subject_chart = []
+        for item in subject_distribution:
+            subject_chart.append({
+                'name': item['curriculum__name'] or item['curriculum__code'],
+                'count': item['count']
+            })
+        
+        # 6. Class Coverage by Curriculum Level
+        class_coverage = (
+            GradeStructure.objects.filter(is_deleted=False, is_active=True)
+            .values('curriculum__name', 'curriculum_level__name')
+            .annotate(count=Count('id'))
+            .order_by('curriculum__name', 'curriculum_level__order')
+        )
+        
+        coverage_chart = []
+        for item in class_coverage:
+            coverage_chart.append({
+                'curriculum': item['curriculum__name'],
+                'level': item['curriculum_level__name'] or 'All Levels',
+                'classes': item['count']
+            })
+        
+        # 7. Subject Type Distribution
+        type_distribution = (
+            Subject.objects.filter(is_active=True)
+            .values('subject_type')
+            .annotate(count=Count('id'))
+        )
+        
+        type_chart = []
+        type_colors = {
+            'compulsory': '#16a34a',
+            'optional': '#ca8a04',
+            'elective': '#6366f1'
+        }
+        for item in type_distribution:
+            stype = item['subject_type']
+            type_chart.append({
+                'name': stype.title(),
+                'value': item['count'],
+                'color': type_colors.get(stype, '#6b7280')
+            })
+        
+        # 8. Learning Area Distribution
+        area_distribution = (
+            Subject.objects.filter(is_active=True, learning_area__isnull=False)
+            .values('learning_area__name', 'learning_area__color_hex')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        
+        area_chart = []
+        for item in area_distribution:
+            area_chart.append({
+                'name': item['learning_area__name'],
+                'count': item['count'],
+                'color': item['learning_area__color_hex'] or '#6366f1'
+            })
+        
+        return Response({
+            'metrics': {
+                'total_curricula': total_curricula,
+                'active_curricula': active_curricula,
+                'total_subjects': total_subjects,
+                'classes_covered': classes_covered,
+                'learning_areas': learning_areas_count,
+            },
+            'subject_distribution': subject_chart,
+            'class_coverage': coverage_chart,
+            'type_distribution': type_chart,
+            'area_distribution': area_chart,
+        })
+
+
+class LearningAreaViewSet(SoftDeleteViewSet):
+    """ViewSet for managing Learning Areas (subject categories)"""
+    queryset = LearningArea.objects.all()
+    serializer_class = LearningAreaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
+
 
 class CurriculumLevelViewSet(SoftDeleteViewSet):
     queryset = CurriculumLevel.objects.all()

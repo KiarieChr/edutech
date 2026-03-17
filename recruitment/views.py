@@ -131,9 +131,18 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(hiring_manager_id=hiring_manager_param)
         
         # Non-HR users can only see published job openings
-        if not self.request.user.is_staff and not self.request.user.employee_profile.department.name == "Human Resources":
+        try:
+            is_hr = (
+                hasattr(self.request.user, 'employee_profile') and
+                self.request.user.employee_profile is not None and
+                self.request.user.employee_profile.department.name == "Human Resources"
+            )
+        except AttributeError:
+            is_hr = False
+
+        if not self.request.user.is_staff and not is_hr:
             queryset = queryset.filter(status=JobOpening.Status.PUBLISHED)
-        
+
         return queryset
     
     @action(detail=True, methods=['post'], permission_classes=[IsHRManager])
@@ -145,6 +154,18 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
                 {'error': 'Job opening must be approved before publishing'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        job_opening.status = JobOpening.Status.PUBLISHED
+        try:
+            job_opening.publish_date = timezone.now().date()
+        except AttributeError:
+            pass
+        try:
+            job_opening.published_by = request.user.employee_profile
+        except AttributeError:
+            pass
+        job_opening.save()
+        return Response({'status': 'published', 'message': 'Job opening published successfully'})
 
     def perform_create(self, serializer):
         job_opening = serializer.save()
@@ -269,16 +290,30 @@ class JobApplicationViewSet(viewsets.ModelViewSet):
         return queryset
     
     def create(self, request, *args, **kwargs):
-        # Add job_opening to context for validation
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
-        # Send acknowledgment email
+
+        # ── Deadline enforcement (server-side, cannot be bypassed) ──
+        job_opening_id = serializer.validated_data.get('job_opening')
+        if job_opening_id:
+            try:
+                job = JobOpening.objects.get(pk=job_opening_id.pk
+                                              if hasattr(job_opening_id, 'pk')
+                                              else job_opening_id)
+                if job.closing_date and job.closing_date < timezone.now().date():
+                    return Response(
+                        {'error': 'Application deadline has expired.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except JobOpening.DoesNotExist:
+                return Response(
+                    {'error': 'Job opening not found.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
         application = serializer.save()
-        
-        # Send acknowledgment email
         self._send_acknowledgment_email(application)
-        
+
         headers = self.get_success_headers(serializer.data)
         return Response(
             serializer.data,

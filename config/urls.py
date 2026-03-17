@@ -23,6 +23,9 @@ urlpatterns = [
     path('api/payables/', include('payables.urls')),
     path('api/fees/', include('fees.urls')),
     path('api/academics/', include('academics.urls')),
+    path('api/timetable/', include('timetable.urls')),
+    path('api/scheduled/', include('scheduled_lessons.urls')),
+    path('api/lesson-sessions/', include('lesson_sessions.urls')),
     path('workforce/', include('workforce.api_urls')),
     #path('api/auth/', rest_framework.urls)
 ]

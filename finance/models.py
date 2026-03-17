@@ -289,6 +289,17 @@ class FinanceSettings(models.Model):
         help_text='Account for student prepayments/unallocated credits'
     )
     
+    # Sundry/Other Debtors - for non-student receivables (general customer invoices)
+    default_sundry_debtors_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='settings_sundry_debtors',
+        limit_choices_to={'type': 'ASSET'},
+        help_text='Account for sundry/other debtors (non-student receivables)'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -14,7 +14,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = ApplicationSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['first_name', 'last_name', 'admission_number', 'email']
+    search_fields = ['first_name', 'last_name', 'email', 'guardian_name', 'phone_number']
     ordering_fields = ['created_at', 'last_name']
 
     def perform_create(self, serializer):

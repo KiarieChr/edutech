@@ -1,6 +1,7 @@
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import Account, AccountType, AccountSubType
 from .serializers import AccountSerializer, AccountTypeOptionSerializer, AccountSubTypeOptionSerializer
 
@@ -10,6 +11,12 @@ class AccountViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['code', 'name', 'type', 'sub_type']
     ordering_fields = ['code', 'name', 'type']
+    
+    def get_permissions(self):
+        """Allow read access without authentication, require auth for write operations"""
+        if self.action in ['list', 'retrieve', 'types', 'sub_types', 'structure']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     @action(detail=False, methods=['get'])
     def types(self, request):
@@ -37,6 +44,12 @@ from .serializers import TaxSerializer, FinanceSettingsSerializer, FiscalPeriodS
 class TaxViewSet(viewsets.ModelViewSet):
     queryset = Tax.objects.all()
     serializer_class = TaxSerializer
+    
+    def get_permissions(self):
+        """Allow read access without authentication"""
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
 class FiscalPeriodViewSet(viewsets.ModelViewSet):
     queryset = FiscalPeriod.objects.all()
@@ -65,58 +78,65 @@ class CashbookViewSet(viewsets.ModelViewSet):
             equity_acc = Account.objects.filter(sub_type='RETAINED_EARNINGS').first()
             if not equity_acc:
                 equity_acc = Account.objects.filter(type='EQUITY').first()
-            
-                if equity_acc and cashbook.account:
-                    # 2. Create Journal using Service (safer)
-                    from journals.services import JournalService
-                    
-                    try:
-                        today = cashbook.opening_balance_date or date.today()
-                        
-                        journal_data = {
-                            'date': today,
-                            'reference': f"OPENBAL-{cashbook.id}",
-                            'description': f"Opening Balance for {cashbook.name}",
-                            'journal_type': 'GENERAL', # or ADJUSTMENT
-                            'status': 'DRAFT' # Created as draft, then posted
+
+            if equity_acc and cashbook.account:
+                # 2. Create Journal using Service (safer)
+                from journals.services import JournalService
+
+                try:
+                    today = cashbook.opening_balance_date or date.today()
+
+                    journal_data = {
+                        'date': today,
+                        'reference': f"OPENBAL-{cashbook.id}",
+                        'description': f"Opening Balance for {cashbook.name}",
+                        'journal_type': 'GENERAL',
+                        'status': 'DRAFT'
+                    }
+
+                    # Prepare lines
+                    lines_data = [
+                        {
+                            'account': cashbook.account,  # Debit Asset
+                            'debit': cashbook.opening_balance,
+                            'credit': 0,
+                            'description': "Opening Balance"
+                        },
+                        {
+                            'account': equity_acc,  # Credit Equity
+                            'debit': 0,
+                            'credit': cashbook.opening_balance,
+                            'description': "Opening Balance Offset"
                         }
-                        
-                        # Prepare lines
-                        lines_data = [
-                            {
-                                'account': cashbook.account, # Debit Asset
-                                'debit': cashbook.opening_balance,
-                                'credit': 0,
-                                'description': "Opening Balance"
-                            },
-                            {
-                                'account': equity_acc, # Credit Equity
-                                'debit': 0,
-                                'credit': cashbook.opening_balance,
-                                'description': "Opening Balance Offset"
-                            }
-                        ]
-                        
-                        # Create Entry
-                        # Currently JournalService.create_journal_entry expects 'lines' in data
-                        journal_data['lines'] = lines_data
-                        entry = JournalService.create_journal_entry(journal_data, user=self.request.user if self.request.user.is_authenticated else None)
-                        
-                        # CRITICAL FIX: Explicitly Post to Ledger
-                        JournalService.post_journal_entry(entry)
-                    
-                        # 4. Mark as posted
-                        cashbook.is_opening_balance_posted = True
-                        cashbook.save()
-                        
-                    except Exception as e:
-                        print(f"Error posting opening balance: {e}")
-                        # Log error but don't fail the cashbook creation generally
+                    ]
+
+                    journal_data['lines'] = lines_data
+                    entry = JournalService.create_journal_entry(
+                        journal_data,
+                        user=self.request.user if self.request.user.is_authenticated else None
+                    )
+
+                    # Explicitly post to ledger
+                    JournalService.post_journal_entry(entry)
+
+                    # Mark as posted
+                    cashbook.is_opening_balance_posted = True
+                    cashbook.save()
+
+                except Exception as e:
+                    print(f"Error posting opening balance: {e}")
+                    # Log error but don't fail the cashbook creation
 
 
 class PaymentMethodViewSet(viewsets.ModelViewSet):
     queryset = PaymentMethod.objects.all()
     serializer_class = PaymentMethodSerializer
+    
+    def get_permissions(self):
+        """Allow read access without authentication"""
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
 from .models import FinanceSettings
 from .serializers import FinanceSettingsSerializer

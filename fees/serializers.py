@@ -5,6 +5,7 @@ from finance.models import Account
 
 class FeeItemSerializer(serializers.ModelSerializer):
     account_name = serializers.ReadOnlyField(source='account.name')
+    is_mandatory = serializers.ReadOnlyField()  # Computed property: not is_optional
     
     class Meta:
         model = FeeItem
@@ -33,7 +34,7 @@ class FeeStructureSerializer(serializers.ModelSerializer):
             'term', 'term_details',
             'grade', 'grade_details',
             'curriculum', 
-            'currency', 'status', 'is_active',
+            'currency', 'status',
             'created_at', 'updated_at',
             'items', 'total_amount',
             'clone_from_id'

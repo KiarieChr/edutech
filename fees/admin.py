@@ -7,6 +7,6 @@ class FeeItemInline(admin.TabularInline):
 
 @admin.register(FeeStructure)
 class FeeStructureAdmin(admin.ModelAdmin):
-    list_display = ('grade', 'term', 'academic_year', 'total_amount', 'is_active')
-    list_filter = ('academic_year', 'term', 'grade', 'is_active')
+    list_display = ('grade', 'term', 'academic_year', 'total_amount')
+    list_filter = ('academic_year', 'term', 'grade')
     inlines = [FeeItemInline]

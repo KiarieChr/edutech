@@ -234,8 +234,33 @@ class Student(models.Model):
     # Identity & Demographics
     admission_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
-    nationality = models.CharField(max_length=100, null=True, blank=True)
+    nationality = models.CharField(max_length=100, null=True, blank=True, default='Kenyan')
     religion = models.CharField(max_length=50, null=True, blank=True)
+    
+    # Kenyan Admission Fields
+    birth_certificate_number = models.CharField(max_length=50, null=True, blank=True, help_text='Birth certificate number')
+    home_address = models.TextField(null=True, blank=True, help_text='Physical home address')
+    
+    # Medical Information
+    medical_conditions = models.TextField(null=True, blank=True, help_text='Any known medical conditions')
+    allergies = models.TextField(null=True, blank=True, help_text='Known allergies')
+    special_needs = models.TextField(null=True, blank=True, help_text='Special educational needs or requirements')
+    blood_group = models.CharField(max_length=5, null=True, blank=True, choices=[
+        ('A+', 'A+'), ('A-', 'A-'), ('B+', 'B+'), ('B-', 'B-'),
+        ('AB+', 'AB+'), ('AB-', 'AB-'), ('O+', 'O+'), ('O-', 'O-')
+    ])
+    
+    # Emergency Contact
+    emergency_contact_name = models.CharField(max_length=150, null=True, blank=True)
+    emergency_contact_phone = models.CharField(max_length=20, null=True, blank=True)
+    emergency_contact_relationship = models.CharField(max_length=50, null=True, blank=True)
+    
+    # Previous School Information
+    previous_school_name = models.CharField(max_length=200, null=True, blank=True)
+    previous_school_address = models.TextField(null=True, blank=True)
+    previous_class = models.CharField(max_length=50, null=True, blank=True)
+    transfer_reason = models.TextField(null=True, blank=True)
+    previous_school_leaving_date = models.DateField(null=True, blank=True)
     
     # Intake/Cohort tracking - tracks which cohort the student belongs to
     intake = models.ForeignKey(

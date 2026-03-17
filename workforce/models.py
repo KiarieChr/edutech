@@ -3475,3 +3475,1139 @@ class PayrollAuditLog(TimestampedModel):
     def __str__(self):
         return f"{self.get_action_display()} - {self.payroll_period.period_name}"
 
+
+# ============================================================================
+# HRMS ENHANCEMENT - PHASE 1: POSITION MANAGEMENT
+# ============================================================================
+
+class Position(AuditedModel):
+    """
+    Funded positions in the organization - separate from job titles.
+    A JobTitle can have multiple Positions across departments.
+    This enables headcount planning and budget control.
+    """
+    class PositionType(models.TextChoices):
+        PERMANENT = 'permanent', _('Permanent')
+        CONTRACT = 'contract', _('Contract')
+        TEMPORARY = 'temporary', _('Temporary')
+        GRANT_FUNDED = 'grant_funded', _('Grant Funded')
+    
+    class FundingStatus(models.TextChoices):
+        FUNDED = 'funded', _('Funded')
+        UNFUNDED = 'unfunded', _('Unfunded')
+        FROZEN = 'frozen', _('Frozen')
+    
+    class VacancyStatus(models.TextChoices):
+        VACANT = 'vacant', _('Vacant')
+        OCCUPIED = 'occupied', _('Occupied')
+        ON_HOLD = 'on_hold', _('On Hold')
+    
+    position_code = models.CharField(max_length=50, unique=True)  # e.g., POS-ACAD-001
+    title = models.CharField(max_length=200)  # Display name
+    
+    job_title = models.ForeignKey(
+        'JobTitle', 
+        on_delete=models.PROTECT, 
+        related_name='positions'
+    )
+    department = models.ForeignKey(
+        'Department', 
+        on_delete=models.PROTECT, 
+        related_name='positions'
+    )
+    campus = models.ForeignKey(
+        'Campus', 
+        on_delete=models.PROTECT,
+        related_name='positions'
+    )
+    
+    reports_to_position = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='subordinate_positions'
+    )
+    
+    position_type = models.CharField(max_length=20, choices=PositionType.choices)
+    funding_status = models.CharField(
+        max_length=20, 
+        choices=FundingStatus.choices, 
+        default=FundingStatus.FUNDED
+    )
+    vacancy_status = models.CharField(
+        max_length=20, 
+        choices=VacancyStatus.choices, 
+        default=VacancyStatus.VACANT
+    )
+    
+    # Budget allocation
+    budgeted_salary = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        null=True, 
+        blank=True
+    )
+    budget_code = models.CharField(max_length=50, blank=True)  # Links to finance
+    fiscal_year = models.PositiveIntegerField(null=True, blank=True)
+    
+    # Dates
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    
+    # Current holder (denormalized for performance)
+    current_employee = models.ForeignKey(
+        Employee, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='held_positions'
+    )
+    
+    is_critical = models.BooleanField(
+        default=False, 
+        help_text="Key position requiring succession plan"
+    )
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    
+    class Meta:
+        db_table = 'hr_position'
+        ordering = ['department', 'position_code']
+        indexes = [
+            models.Index(fields=['department', 'vacancy_status']),
+            models.Index(fields=['position_code']),
+            models.Index(fields=['vacancy_status']),
+            models.Index(fields=['funding_status']),
+        ]
+    
+    def __str__(self):
+        return f"{self.position_code} - {self.title}"
+    
+    def assign_employee(self, employee):
+        """Assign an employee to this position"""
+        self.current_employee = employee
+        self.vacancy_status = self.VacancyStatus.OCCUPIED
+        self.save()
+    
+    def vacate(self):
+        """Mark position as vacant"""
+        self.current_employee = None
+        self.vacancy_status = self.VacancyStatus.VACANT
+        self.save()
+
+
+# ============================================================================
+# HRMS ENHANCEMENT - PHASE 2: EMPLOYEE LIFECYCLE MANAGEMENT
+# ============================================================================
+
+class EmployeeLifecycleLog(TimestampedModel):
+    """
+    Comprehensive audit trail of all employee lifecycle events.
+    Provides complete historical record for compliance and analytics.
+    """
+    class EventType(models.TextChoices):
+        HIRED = 'hired', _('Hired')
+        PROMOTION = 'promotion', _('Promotion')
+        TRANSFER = 'transfer', _('Transfer')
+        DEMOTION = 'demotion', _('Demotion')
+        SALARY_CHANGE = 'salary_change', _('Salary Change')
+        STATUS_CHANGE = 'status_change', _('Status Change')
+        PROBATION_CONFIRMED = 'probation_confirmed', _('Probation Confirmed')
+        PROBATION_EXTENDED = 'probation_extended', _('Probation Extended')
+        SUSPENDED = 'suspended', _('Suspended')
+        REINSTATED = 'reinstated', _('Reinstated')
+        RESIGNED = 'resigned', _('Resigned')
+        TERMINATED = 'terminated', _('Terminated')
+        RETIRED = 'retired', _('Retired')
+        CONTRACT_RENEWED = 'contract_renewed', _('Contract Renewed')
+        CONTRACT_ENDED = 'contract_ended', _('Contract Ended')
+        POSITION_ASSIGNED = 'position_assigned', _('Position Assigned')
+        DEPARTMENT_CHANGED = 'department_changed', _('Department Changed')
+    
+    employee = models.ForeignKey(
+        Employee, 
+        on_delete=models.CASCADE, 
+        related_name='lifecycle_logs'
+    )
+    event_type = models.CharField(max_length=30, choices=EventType.choices)
+    event_date = models.DateField()
+    effective_date = models.DateField()
+    
+    # Before/After snapshots
+    old_status = models.CharField(max_length=50, blank=True)
+    new_status = models.CharField(max_length=50)
+    old_department = models.ForeignKey(
+        'Department', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='lifecycle_logs_old_dept'
+    )
+    new_department = models.ForeignKey(
+        'Department', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='lifecycle_logs_new_dept'
+    )
+    old_position = models.ForeignKey(
+        'Position', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='lifecycle_logs_old_pos'
+    )
+    new_position = models.ForeignKey(
+        'Position', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='lifecycle_logs_new_pos'
+    )
+    old_job_grade = models.ForeignKey(
+        'JobGrade',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lifecycle_logs_old_grade'
+    )
+    new_job_grade = models.ForeignKey(
+        'JobGrade',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lifecycle_logs_new_grade'
+    )
+    old_salary = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        null=True, 
+        blank=True
+    )
+    new_salary = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        null=True, 
+        blank=True
+    )
+    
+    # Documentation
+    reason = models.TextField()
+    supporting_document = models.FileField(
+        upload_to='lifecycle_docs/%Y/%m/', 
+        blank=True
+    )
+    reference_number = models.CharField(
+        max_length=100, 
+        blank=True,
+        help_text="e.g., termination letter number"
+    )
+    
+    # Approval
+    initiated_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        related_name='initiated_lifecycle_events'
+    )
+    approved_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='approved_lifecycle_events'
+    )
+    approval_date = models.DateTimeField(null=True, blank=True)
+    
+    # Metadata
+    metadata = models.JSONField(
+        default=dict, 
+        blank=True, 
+        help_text="Additional event-specific data"
+    )
+    
+    class Meta:
+        db_table = 'hr_employee_lifecycle_log'
+        ordering = ['-event_date', '-created_at']
+        indexes = [
+            models.Index(fields=['employee', 'event_type']),
+            models.Index(fields=['event_date']),
+            models.Index(fields=['event_type']),
+            models.Index(fields=['effective_date']),
+        ]
+    
+    def __str__(self):
+        return f"{self.employee.employee_no} - {self.get_event_type_display()} - {self.event_date}"
+
+
+# ============================================================================
+# HRMS ENHANCEMENT - PHASE 3: BULK IMPORT FRAMEWORK
+# ============================================================================
+
+class BulkImportSession(AuditedModel):
+    """
+    Tracks Excel import sessions with validation and preview.
+    Supports multiple import types with staged validation.
+    """
+    class ImportType(models.TextChoices):
+        EMPLOYEES = 'employees', _('Employees')
+        DEPARTMENTS = 'departments', _('Departments')
+        POSITIONS = 'positions', _('Positions')
+        ATTENDANCE = 'attendance', _('Attendance')
+        LEAVE_BALANCES = 'leave_balances', _('Leave Balances')
+        JOB_TITLES = 'job_titles', _('Job Titles')
+        JOB_GRADES = 'job_grades', _('Job Grades')
+    
+    class Status(models.TextChoices):
+        UPLOADED = 'uploaded', _('Uploaded')
+        VALIDATING = 'validating', _('Validating')
+        VALIDATED = 'validated', _('Validated')
+        VALIDATION_FAILED = 'validation_failed', _('Validation Failed')
+        PREVIEW = 'preview', _('Ready for Preview')
+        IMPORTING = 'importing', _('Importing')
+        COMPLETED = 'completed', _('Completed')
+        PARTIALLY_COMPLETED = 'partially_completed', _('Partially Completed')
+        FAILED = 'failed', _('Failed')
+        CANCELLED = 'cancelled', _('Cancelled')
+    
+    import_type = models.CharField(max_length=30, choices=ImportType.choices)
+    status = models.CharField(
+        max_length=30, 
+        choices=Status.choices, 
+        default=Status.UPLOADED
+    )
+    
+    # File tracking
+    original_filename = models.CharField(max_length=255)
+    uploaded_file = models.FileField(upload_to='bulk_imports/%Y/%m/')
+    file_size_bytes = models.PositiveIntegerField()
+    
+    # Statistics
+    total_rows = models.PositiveIntegerField(default=0)
+    valid_rows = models.PositiveIntegerField(default=0)
+    error_rows = models.PositiveIntegerField(default=0)
+    warning_rows = models.PositiveIntegerField(default=0)
+    imported_rows = models.PositiveIntegerField(default=0)
+    skipped_rows = models.PositiveIntegerField(default=0)
+    
+    # Processing timestamps
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    validation_started_at = models.DateTimeField(null=True, blank=True)
+    validation_completed_at = models.DateTimeField(null=True, blank=True)
+    import_started_at = models.DateTimeField(null=True, blank=True)
+    import_completed_at = models.DateTimeField(null=True, blank=True)
+    
+    # User tracking
+    uploaded_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        related_name='bulk_imports'
+    )
+    approved_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='approved_imports'
+    )
+    approval_date = models.DateTimeField(null=True, blank=True)
+    
+    # Error log
+    error_summary = models.TextField(blank=True)
+    error_file = models.FileField(
+        upload_to='bulk_imports/errors/%Y/%m/', 
+        blank=True
+    )
+    
+    # Options
+    skip_duplicates = models.BooleanField(
+        default=True,
+        help_text="Skip rows with duplicate identifiers"
+    )
+    update_existing = models.BooleanField(
+        default=False,
+        help_text="Update existing records instead of skipping"
+    )
+    
+    class Meta:
+        db_table = 'hr_bulk_import_session'
+        ordering = ['-uploaded_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['import_type', 'status']),
+            models.Index(fields=['uploaded_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.get_import_type_display()} - {self.original_filename} ({self.get_status_display()})"
+
+
+class BulkImportRecord(models.Model):
+    """
+    Individual row from Excel with validation status.
+    Each row is tracked separately for detailed error reporting.
+    """
+    class Status(models.TextChoices):
+        PENDING = 'pending', _('Pending Validation')
+        VALID = 'valid', _('Valid')
+        INVALID = 'invalid', _('Invalid')
+        WARNING = 'warning', _('Valid with Warnings')
+        IMPORTED = 'imported', _('Imported')
+        SKIPPED = 'skipped', _('Skipped')
+        FAILED = 'failed', _('Import Failed')
+    
+    import_session = models.ForeignKey(
+        BulkImportSession, 
+        on_delete=models.CASCADE, 
+        related_name='records'
+    )
+    row_number = models.PositiveIntegerField()
+    
+    # Raw data from Excel
+    raw_data = models.JSONField()
+    
+    # Validation results
+    status = models.CharField(
+        max_length=20, 
+        choices=Status.choices, 
+        default=Status.PENDING
+    )
+    validation_errors = models.JSONField(default=list, blank=True)
+    validation_warnings = models.JSONField(default=list, blank=True)
+    
+    # Processed data (after transformation)
+    processed_data = models.JSONField(null=True, blank=True)
+    
+    # Reference to created record
+    created_employee_id = models.PositiveIntegerField(null=True, blank=True)
+    created_object_type = models.CharField(max_length=50, blank=True)
+    created_object_id = models.PositiveIntegerField(null=True, blank=True)
+    
+    # Error details
+    error_message = models.TextField(blank=True)
+    
+    class Meta:
+        db_table = 'hr_bulk_import_record'
+        ordering = ['row_number']
+        unique_together = ['import_session', 'row_number']
+        indexes = [
+            models.Index(fields=['import_session', 'status']),
+        ]
+    
+    def __str__(self):
+        return f"Row {self.row_number} - {self.get_status_display()}"
+
+
+# ============================================================================
+# HRMS ENHANCEMENT - PHASE 4: DOCUMENT MANAGEMENT
+# ============================================================================
+
+class EmployeeDocument(AuditedModel):
+    """
+    Centralized document storage for employees.
+    Supports categorization, verification, and expiry tracking.
+    """
+    class DocumentCategory(models.TextChoices):
+        IDENTIFICATION = 'identification', _('Identification')
+        EDUCATION = 'education', _('Education')
+        EMPLOYMENT = 'employment', _('Employment')
+        CERTIFICATION = 'certification', _('Certification')
+        MEDICAL = 'medical', _('Medical')
+        LEGAL = 'legal', _('Legal')
+        CONTRACT = 'contract', _('Contract')
+        PERFORMANCE = 'performance', _('Performance')
+        DISCIPLINARY = 'disciplinary', _('Disciplinary')
+        FINANCIAL = 'financial', _('Financial')
+        OTHER = 'other', _('Other')
+    
+    class VerificationStatus(models.TextChoices):
+        PENDING = 'pending', _('Pending Verification')
+        VERIFIED = 'verified', _('Verified')
+        REJECTED = 'rejected', _('Rejected')
+        EXPIRED = 'expired', _('Expired')
+    
+    employee = models.ForeignKey(
+        Employee, 
+        on_delete=models.CASCADE, 
+        related_name='documents'
+    )
+    
+    document_name = models.CharField(max_length=255)
+    document_category = models.CharField(
+        max_length=30, 
+        choices=DocumentCategory.choices
+    )
+    document_type = models.CharField(
+        max_length=100, 
+        help_text="e.g., Passport, Degree Certificate, Contract"
+    )
+    description = models.TextField(blank=True)
+    
+    file = models.FileField(upload_to='employee_documents/%Y/%m/')
+    file_size_bytes = models.PositiveIntegerField()
+    mime_type = models.CharField(max_length=100)
+    original_filename = models.CharField(max_length=255)
+    
+    # Document metadata
+    document_number = models.CharField(
+        max_length=100, 
+        blank=True, 
+        help_text="e.g., Passport Number, Certificate Number"
+    )
+    issue_date = models.DateField(null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    issuing_authority = models.CharField(max_length=255, blank=True)
+    issuing_country = models.ForeignKey(
+        'Country',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='issued_documents'
+    )
+    
+    # Verification
+    verification_status = models.CharField(
+        max_length=20, 
+        choices=VerificationStatus.choices, 
+        default=VerificationStatus.PENDING
+    )
+    verified_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='verified_employee_documents'
+    )
+    verification_date = models.DateField(null=True, blank=True)
+    verification_notes = models.TextField(blank=True)
+    rejection_reason = models.TextField(blank=True)
+    
+    # Access control
+    is_confidential = models.BooleanField(
+        default=False,
+        help_text="Only HR admins can view"
+    )
+    is_active = models.BooleanField(default=True)
+    
+    # Alert settings
+    expiry_alert_days = models.PositiveIntegerField(
+        default=30,
+        help_text="Days before expiry to send alert"
+    )
+    expiry_alert_sent = models.BooleanField(default=False)
+    expiry_alert_sent_date = models.DateTimeField(null=True, blank=True)
+    
+    # Version control
+    version = models.PositiveIntegerField(default=1)
+    previous_version = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='newer_versions'
+    )
+    
+    class Meta:
+        db_table = 'hr_employee_document'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', 'document_category']),
+            models.Index(fields=['expiry_date']),
+            models.Index(fields=['verification_status']),
+            models.Index(fields=['document_category']),
+        ]
+    
+    def __str__(self):
+        return f"{self.employee.employee_no} - {self.document_name}"
+    
+    @property
+    def is_expired(self):
+        """Check if document has expired"""
+        if self.expiry_date:
+            from django.utils import timezone
+            return self.expiry_date < timezone.now().date()
+        return False
+    
+    @property
+    def days_until_expiry(self):
+        """Calculate days until expiry"""
+        if self.expiry_date:
+            from django.utils import timezone
+            delta = self.expiry_date - timezone.now().date()
+            return delta.days
+        return None
+
+
+# ============================================================================
+# HRMS ENHANCEMENT - PHASE 5: HR AUTOMATION
+# ============================================================================
+
+class HRAutomationRule(AuditedModel):
+    """
+    Configurable automation rules for HR events.
+    Triggers notifications and workflows based on defined conditions.
+    """
+    class TriggerEvent(models.TextChoices):
+        PROBATION_ENDING = 'probation_ending', _('Probation Ending Soon')
+        CONTRACT_ENDING = 'contract_ending', _('Contract Ending Soon')
+        DOCUMENT_EXPIRING = 'document_expiring', _('Document Expiring')
+        BIRTHDAY = 'birthday', _('Employee Birthday')
+        WORK_ANNIVERSARY = 'work_anniversary', _('Work Anniversary')
+        APPRAISAL_DUE = 'appraisal_due', _('Appraisal Due')
+        LEAVE_BALANCE_LOW = 'leave_balance_low', _('Leave Balance Low')
+        NEW_HIRE_ONBOARDING = 'new_hire_onboarding', _('New Hire Onboarding')
+        STATUS_CHANGE = 'status_change', _('Employment Status Change')
+        CERTIFICATION_EXPIRING = 'certification_expiring', _('Certification Expiring')
+        ATTENDANCE_THRESHOLD = 'attendance_threshold', _('Attendance Threshold')
+        LEAVE_REQUEST_PENDING = 'leave_request_pending', _('Leave Request Pending')
+    
+    class ActionType(models.TextChoices):
+        SEND_EMAIL = 'send_email', _('Send Email')
+        SEND_NOTIFICATION = 'send_notification', _('Send In-App Notification')
+        CREATE_TASK = 'create_task', _('Create Task')
+        UPDATE_STATUS = 'update_status', _('Update Status')
+        TRIGGER_WORKFLOW = 'trigger_workflow', _('Trigger Workflow')
+        SEND_SMS = 'send_sms', _('Send SMS')
+    
+    name = models.CharField(max_length=255)
+    code = models.CharField(max_length=50, unique=True)
+    description = models.TextField(blank=True)
+    
+    trigger_event = models.CharField(max_length=30, choices=TriggerEvent.choices)
+    trigger_conditions = models.JSONField(
+        default=dict, 
+        help_text="Additional conditions in JSON format"
+    )
+    trigger_days_before = models.PositiveIntegerField(
+        default=7, 
+        help_text="Days before event to trigger"
+    )
+    
+    action_type = models.CharField(max_length=30, choices=ActionType.choices)
+    action_config = models.JSONField(
+        default=dict, 
+        help_text="Action configuration in JSON format"
+    )
+    
+    # Recipients
+    notify_employee = models.BooleanField(default=True)
+    notify_supervisor = models.BooleanField(default=False)
+    notify_hr = models.BooleanField(default=True)
+    notify_department_head = models.BooleanField(default=False)
+    additional_recipients = models.JSONField(
+        default=list, 
+        blank=True,
+        help_text="List of email addresses or user IDs"
+    )
+    
+    # Email template
+    email_subject = models.CharField(max_length=255, blank=True)
+    email_body_template = models.TextField(
+        blank=True,
+        help_text="Supports placeholders: {employee_name}, {event_date}, etc."
+    )
+    
+    # Scheduling
+    is_active = models.BooleanField(default=True)
+    run_frequency = models.CharField(
+        max_length=20,
+        choices=[
+            ('daily', 'Daily'),
+            ('weekly', 'Weekly'),
+            ('monthly', 'Monthly'),
+        ],
+        default='daily'
+    )
+    last_run = models.DateTimeField(null=True, blank=True)
+    next_run = models.DateTimeField(null=True, blank=True)
+    run_count = models.PositiveIntegerField(default=0)
+    
+    # Scope
+    applies_to_departments = models.ManyToManyField(
+        'Department',
+        blank=True,
+        related_name='automation_rules',
+        help_text="Leave empty to apply to all departments"
+    )
+    applies_to_employee_categories = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of employee categories: teaching, non_teaching, etc."
+    )
+    
+    class Meta:
+        db_table = 'hr_automation_rule'
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['trigger_event', 'is_active']),
+            models.Index(fields=['is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class HRAutomationLog(TimestampedModel):
+    """
+    Log of automation executions for audit and debugging.
+    """
+    class Status(models.TextChoices):
+        SUCCESS = 'success', _('Success')
+        FAILED = 'failed', _('Failed')
+        SKIPPED = 'skipped', _('Skipped')
+        PARTIAL = 'partial', _('Partial Success')
+    
+    rule = models.ForeignKey(
+        HRAutomationRule, 
+        on_delete=models.CASCADE, 
+        related_name='logs'
+    )
+    employee = models.ForeignKey(
+        Employee, 
+        on_delete=models.CASCADE, 
+        related_name='automation_logs',
+        null=True,
+        blank=True
+    )
+    
+    triggered_at = models.DateTimeField(auto_now_add=True)
+    trigger_reason = models.CharField(max_length=255)
+    action_taken = models.CharField(max_length=255)
+    
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.SUCCESS
+    )
+    error_message = models.TextField(blank=True)
+    
+    # Notification tracking
+    recipients_notified = models.JSONField(default=list, blank=True)
+    notification_sent_at = models.DateTimeField(null=True, blank=True)
+    
+    # Additional context
+    context_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional context about the trigger"
+    )
+    
+    class Meta:
+        db_table = 'hr_automation_log'
+        ordering = ['-triggered_at']
+        indexes = [
+            models.Index(fields=['rule', 'triggered_at']),
+            models.Index(fields=['employee', 'triggered_at']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        emp_no = self.employee.employee_no if self.employee else 'N/A'
+        return f"{self.rule.code} - {emp_no} - {self.triggered_at}"
+
+
+# ============================================================================
+# HRMS ENHANCEMENT - HR NOTIFICATION PREFERENCES
+# ============================================================================
+
+class HRNotificationPreference(AuditedModel):
+    """
+    User preferences for HR notifications.
+    """
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='hr_notification_preferences'
+    )
+    
+    # Email notifications
+    email_probation_reminders = models.BooleanField(default=True)
+    email_contract_reminders = models.BooleanField(default=True)
+    email_document_expiry = models.BooleanField(default=True)
+    email_leave_requests = models.BooleanField(default=True)
+    email_appraisal_reminders = models.BooleanField(default=True)
+    email_birthday_wishes = models.BooleanField(default=True)
+    email_work_anniversary = models.BooleanField(default=True)
+    
+    # In-app notifications
+    app_probation_reminders = models.BooleanField(default=True)
+    app_contract_reminders = models.BooleanField(default=True)
+    app_document_expiry = models.BooleanField(default=True)
+    app_leave_requests = models.BooleanField(default=True)
+    app_appraisal_reminders = models.BooleanField(default=True)
+    
+    # Frequency preferences
+    digest_frequency = models.CharField(
+        max_length=20,
+        choices=[
+            ('immediate', 'Immediate'),
+            ('daily', 'Daily Digest'),
+            ('weekly', 'Weekly Digest'),
+        ],
+        default='immediate'
+    )
+    
+    quiet_hours_start = models.TimeField(null=True, blank=True)
+    quiet_hours_end = models.TimeField(null=True, blank=True)
+    
+    class Meta:
+        db_table = 'hr_notification_preference'
+    
+    def __str__(self):
+        return f"Notification Preferences - {self.user.username}"
+
+
+# ============================================
+# PAYROLL CONFIGURATION MODELS
+# ============================================
+
+class PayrollConfiguration(AuditedModel):
+    """
+    Global payroll configuration settings.
+    Singleton pattern - only one active configuration per organization.
+    """
+    
+    class PayFrequency(models.TextChoices):
+        WEEKLY = 'weekly', _('Weekly')
+        BI_WEEKLY = 'bi_weekly', _('Bi-Weekly')
+        MONTHLY = 'monthly', _('Monthly')
+    
+    class FinancialYearStart(models.TextChoices):
+        JANUARY = 'january', _('January (Calendar Year)')
+        APRIL = 'april', _('April (UK/India)')
+        JULY = 'july', _('July (East Africa)')
+        OCTOBER = 'october', _('October (US Federal)')
+    
+    # Cycle Settings
+    pay_frequency = models.CharField(
+        max_length=20,
+        choices=PayFrequency.choices,
+        default=PayFrequency.MONTHLY
+    )
+    payroll_run_date = models.PositiveSmallIntegerField(
+        default=25,
+        help_text="Day of month when payroll is processed"
+    )
+    attendance_cutoff_date = models.PositiveSmallIntegerField(
+        default=20,
+        help_text="Last day for including attendance/OT in current cycle"
+    )
+    financial_year_start = models.CharField(
+        max_length=20,
+        choices=FinancialYearStart.choices,
+        default=FinancialYearStart.JULY
+    )
+    is_locked = models.BooleanField(
+        default=False,
+        help_text="Lock prevents all payroll changes"
+    )
+    
+    # Calculation Settings
+    currency_code = models.CharField(max_length=3, default='KES')
+    rounding_method = models.CharField(
+        max_length=20,
+        choices=[
+            ('none', 'No Rounding (Exact)'),
+            ('nearest', 'Nearest Whole Number'),
+            ('up_10', 'Round Up to Nearest 10'),
+        ],
+        default='none'
+    )
+    overtime_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=1,
+        default=Decimal('1.5')
+    )
+    holiday_multiplier = models.DecimalField(
+        max_digits=3,
+        decimal_places=1,
+        default=Decimal('2.0')
+    )
+    enable_proration = models.BooleanField(
+        default=True,
+        help_text="Auto-calculate for mid-month joiners/leavers"
+    )
+    
+    # Security Settings
+    require_2fa_approval = models.BooleanField(default=False)
+    allow_retroactive_changes = models.BooleanField(default=False)
+    audit_retention_years = models.PositiveSmallIntegerField(default=7)
+    
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        db_table = 'payroll_configuration'
+        verbose_name = 'Payroll Configuration'
+    
+    def __str__(self):
+        return f"Payroll Config ({self.pay_frequency})"
+    
+    @classmethod
+    def get_active(cls):
+        """Get the active configuration or create default."""
+        config, created = cls.objects.get_or_create(
+            is_active=True,
+            defaults={'pay_frequency': 'monthly'}
+        )
+        return config
+
+
+class TaxBand(AuditedModel):
+    """
+    Income tax bands for PAYE calculation.
+    Supports versioning via effective_date.
+    """
+    
+    lower_limit = models.DecimalField(max_digits=12, decimal_places=2)
+    upper_limit = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2,
+        null=True, 
+        blank=True,
+        help_text="Leave blank for top band (no upper limit)"
+    )
+    rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        help_text="Tax rate as percentage (e.g., 30.00)"
+    )
+    
+    effective_date = models.DateField(
+        help_text="Date from which this band applies"
+    )
+    expiry_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Leave blank if currently active"
+    )
+    
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    
+    class Meta:
+        db_table = 'payroll_tax_band'
+        ordering = ['effective_date', 'sort_order', 'lower_limit']
+    
+    def __str__(self):
+        upper = f"{self.upper_limit:,.0f}" if self.upper_limit else "∞"
+        return f"{self.lower_limit:,.0f} - {upper} @ {self.rate}%"
+    
+    @classmethod
+    def get_current_bands(cls):
+        """Get currently active tax bands."""
+        today = timezone.now().date()
+        return cls.objects.filter(
+            is_active=True,
+            effective_date__lte=today
+        ).filter(
+            models.Q(expiry_date__isnull=True) | models.Q(expiry_date__gte=today)
+        ).order_by('sort_order', 'lower_limit')
+
+
+class TaxRelief(AuditedModel):
+    """
+    Tax relief configurations (Personal, Insurance, Housing, etc.)
+    """
+    
+    class ReliefType(models.TextChoices):
+        PERSONAL = 'personal', _('Personal Relief')
+        INSURANCE = 'insurance', _('Insurance Relief')
+        HOUSING = 'housing', _('Affordable Housing Relief')
+        PENSION = 'pension', _('Pension Relief')
+        DISABILITY = 'disability', _('Disability Relief')
+    
+    relief_type = models.CharField(
+        max_length=20,
+        choices=ReliefType.choices,
+        unique=True
+    )
+    name = models.CharField(max_length=100)
+    
+    # For fixed amount reliefs
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Fixed monthly relief amount"
+    )
+    
+    # For percentage-based reliefs
+    percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Relief as % of contribution"
+    )
+    max_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Maximum relief cap"
+    )
+    
+    effective_date = models.DateField()
+    expiry_date = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        db_table = 'payroll_tax_relief'
+    
+    def __str__(self):
+        return f"{self.name} - {self.amount or f'{self.percentage}%'}"
+
+
+class StatutoryRate(AuditedModel):
+    """
+    Statutory deduction rates (NSSF, NHIF/SHA, Housing Levy, etc.)
+    """
+    
+    class RateType(models.TextChoices):
+        NSSF_TIER1 = 'nssf_tier1', _('NSSF Tier I')
+        NSSF_TIER2 = 'nssf_tier2', _('NSSF Tier II')
+        SHIF = 'shif', _('Social Health Insurance Fund')
+        NHIF = 'nhif', _('NHIF (Legacy)')
+        HOUSING_LEVY = 'housing_levy', _('Affordable Housing Levy')
+        NITA = 'nita', _('NITA Levy')
+    
+    rate_type = models.CharField(
+        max_length=20,
+        choices=RateType.choices
+    )
+    name = models.CharField(max_length=100)
+    
+    # Rate configuration
+    employee_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Employee contribution %"
+    )
+    employer_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Employer contribution %"
+    )
+    fixed_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Fixed amount if not percentage-based"
+    )
+    
+    # Limits
+    lower_limit = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Income threshold for this tier"
+    )
+    upper_limit = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+    max_contribution = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Maximum contribution cap"
+    )
+    
+    effective_date = models.DateField()
+    expiry_date = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether this deduction is applied in calculations"
+    )
+    
+    class Meta:
+        db_table = 'payroll_statutory_rate'
+        ordering = ['rate_type', 'effective_date']
+    
+    def __str__(self):
+        return f"{self.name} ({self.rate_type})"
+
+
+class GLAccountMapping(AuditedModel):
+    """
+    Maps payroll items to General Ledger accounts for finance integration.
+    """
+    
+    class MappingType(models.TextChoices):
+        SALARY_EXPENSE = 'salary_expense', _('Gross Salary Expense')
+        PAYE_LIABILITY = 'paye_liability', _('PAYE Payable')
+        NSSF_LIABILITY = 'nssf_liability', _('NSSF Payable')
+        NHIF_LIABILITY = 'nhif_liability', _('NHIF/SHIF Payable')
+        HOUSING_LEVY = 'housing_levy', _('Housing Levy Payable')
+        PENSION_LIABILITY = 'pension_liability', _('Pension Payable')
+        NET_PAY_LIABILITY = 'net_pay_liability', _('Net Salary Payable')
+        BANK_ACCOUNT = 'bank_account', _('Payroll Bank Account')
+        ALLOWANCE_EXPENSE = 'allowance_expense', _('Allowances Expense')
+        OVERTIME_EXPENSE = 'overtime_expense', _('Overtime Expense')
+    
+    mapping_type = models.CharField(
+        max_length=30,
+        choices=MappingType.choices,
+        unique=True
+    )
+    gl_account_code = models.CharField(max_length=50)
+    gl_account_name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        db_table = 'payroll_gl_mapping'
+    
+    def __str__(self):
+        return f"{self.gl_account_code} - {self.gl_account_name}"
+
+
+class ApprovalWorkflowLevel(AuditedModel):
+    """
+    Configurable approval workflow for payroll processing.
+    """
+    
+    level_number = models.PositiveSmallIntegerField()
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    
+    # Who can approve
+    approver_role = models.CharField(
+        max_length=100,
+        help_text="Role name that can approve at this level"
+    )
+    
+    # Permissions
+    can_approve = models.BooleanField(default=True)
+    can_reject = models.BooleanField(default=True)
+    can_request_changes = models.BooleanField(default=True)
+    
+    # Notifications
+    notify_on_pending = models.BooleanField(default=True)
+    auto_escalate_hours = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="Hours before auto-escalating to next level"
+    )
+    
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        db_table = 'payroll_approval_workflow'
+        ordering = ['level_number']
+    
+    def __str__(self):
+        return f"Level {self.level_number}: {self.name}"

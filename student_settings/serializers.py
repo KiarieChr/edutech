@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     AcademicYear, Term, Curriculum, GradeStructure, Stream,
     AdmissionConfig, StudentStatus, PromotionRule, DemographicConfig, SchoolCalendar, Intake,
-    CurriculumLevel
+    CurriculumLevel, LearningArea
 )
 
 class AcademicYearSerializer(serializers.ModelSerializer):
@@ -60,6 +60,18 @@ class CurriculumSerializer(serializers.ModelSerializer):
     class Meta:
         model = Curriculum
         fields = '__all__'
+
+
+class LearningAreaSerializer(serializers.ModelSerializer):
+    subject_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = LearningArea
+        fields = '__all__'
+    
+    def get_subject_count(self, obj):
+        return obj.subjects.filter(is_active=True).count()
+
 
 class CurriculumLevelSerializer(serializers.ModelSerializer):
     curriculum_name = serializers.ReadOnlyField(source='curriculum.name')

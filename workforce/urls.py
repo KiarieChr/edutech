@@ -26,6 +26,19 @@ router.register(r'payroll-periods', PayrollPeriodViewSet, basename='payroll-peri
 router.register(r'payroll-calculations', PayrollCalculationViewSet, basename='payroll-calculation')
 router.register(r'payslips', PayslipViewSet, basename='payslip')
 
+# HRMS Enhancement Routes
+router.register(r'positions', PositionViewSet, basename='position')
+router.register(r'lifecycle-logs', EmployeeLifecycleLogViewSet, basename='lifecycle-log')
+router.register(r'employee-lifecycle', EmployeeLifecycleViewSet, basename='employee-lifecycle')
+router.register(r'bulk-imports', BulkImportSessionViewSet, basename='bulk-import')
+router.register(r'employee-documents', EmployeeDocumentViewSet, basename='employee-document')
+router.register(r'automation-rules', HRAutomationRuleViewSet, basename='automation-rule')
+router.register(r'notification-preferences', HRNotificationPreferenceViewSet, basename='notification-preference')
+router.register(r'org-chart', OrgChartViewSet, basename='org-chart')
+router.register(r'hr-analytics', HRAnalyticsViewSet, basename='hr-analytics')
+router.register(r'payroll-dashboard', PayrollDashboardViewSet, basename='payroll-dashboard')
+router.register(r'payroll-settings', PayrollSettingsViewSet, basename='payroll-settings')
+
 app_name = 'hr_payroll'
 
 
@@ -122,4 +135,9 @@ urlpatterns = [
     path('api/reports/batch-payslips/', 
          batch_generate_payslips, 
          name='api-batch-payslips'),
+    
+    # ========================================================================
+    # REST API (ViewSets via Router)
+    # ========================================================================
+    path('api/', include(router.urls)),
 ]

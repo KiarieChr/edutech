@@ -198,6 +198,36 @@ class CurriculumLevel(BaseModel):
     def __str__(self):
         return f"{self.curriculum.code} - {self.name}"
 
+
+class LearningArea(BaseModel):
+    """Groups subjects into broader categories (Sciences, Languages, Humanities, etc.)"""
+    CATEGORY_CHOICES = (
+        ('sciences', 'Sciences'),
+        ('languages', 'Languages'),
+        ('humanities', 'Humanities'),
+        ('technical', 'Technical/Vocational'),
+        ('arts', 'Creative Arts'),
+        ('pe', 'Physical Education'),
+        ('other', 'Other'),
+    )
+    
+    name = models.CharField(max_length=100, unique=True)  # e.g., Sciences, Languages
+    code = models.CharField(max_length=20, blank=True, null=True)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    description = models.TextField(blank=True, null=True)
+    color_hex = models.CharField(max_length=7, default='#6366f1', help_text="UI color")
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0, help_text="Display order")
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name = 'Learning Area'
+        verbose_name_plural = 'Learning Areas'
+
+    def __str__(self):
+        return self.name
+
+
 class GradeStructure(BaseModel):
     curriculum = models.ForeignKey(Curriculum, on_delete=models.CASCADE, related_name="grades")
     curriculum_level = models.ForeignKey(

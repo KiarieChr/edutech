@@ -112,6 +112,64 @@ class Employee(AuditedModel):
     confirmation_date = models.DateField(null=True, blank=True)
     termination_date = models.DateField(null=True, blank=True)
     
+    # Enhanced lifecycle tracking (HRMS Enhancement)
+    probation_end_date = models.DateField(
+        null=True, 
+        blank=True,
+        help_text="Expected end date of probation period"
+    )
+    probation_period_months = models.PositiveIntegerField(
+        default=3,
+        help_text="Duration of probation in months"
+    )
+    last_promotion_date = models.DateField(null=True, blank=True)
+    resignation_date = models.DateField(null=True, blank=True)
+    resignation_reason = models.TextField(blank=True)
+    notice_period_days = models.PositiveIntegerField(default=30)
+    last_working_day = models.DateField(null=True, blank=True)
+    termination_reason = models.TextField(blank=True)
+    exit_interview_completed = models.BooleanField(default=False)
+    exit_interview_date = models.DateField(null=True, blank=True)
+    rehire_eligible = models.BooleanField(default=True)
+    rehire_notes = models.TextField(blank=True)
+    
+    # Contract details (for contract employees)
+    contract_start_date = models.DateField(null=True, blank=True)
+    contract_end_date = models.DateField(null=True, blank=True)
+    contract_renewal_count = models.PositiveIntegerField(default=0)
+    
+    # Additional personal info
+    blood_group = models.CharField(
+        max_length=10, 
+        blank=True,
+        choices=[
+            ('A+', 'A+'), ('A-', 'A-'),
+            ('B+', 'B+'), ('B-', 'B-'),
+            ('AB+', 'AB+'), ('AB-', 'AB-'),
+            ('O+', 'O+'), ('O-', 'O-'),
+        ]
+    )
+    marital_status = models.CharField(
+        max_length=20,
+        blank=True,
+        choices=[
+            ('single', 'Single'),
+            ('married', 'Married'),
+            ('divorced', 'Divorced'),
+            ('widowed', 'Widowed'),
+        ]
+    )
+    spouse_name = models.CharField(max_length=200, blank=True)
+    number_of_dependents = models.PositiveIntegerField(default=0)
+    
+    # System flags
+    is_system_user = models.BooleanField(
+        default=True, 
+        help_text="Has login credentials"
+    )
+    profile_completion_percentage = models.PositiveIntegerField(default=0)
+    last_profile_update = models.DateTimeField(null=True, blank=True)
+    
     # References to other modules
     job_grade = models.ForeignKey(
         'JobGrade', 

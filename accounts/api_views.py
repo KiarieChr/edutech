@@ -15,7 +15,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext_lazy as _
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, F, When, Case, IntegerField
+from django.db.models import Count, Q, F, When, Case, IntegerField, Sum
 from django.db.models.functions import TruncMonth, TruncDay, TruncWeek
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -90,76 +90,129 @@ class DashboardStatsAPIView(APIView):
         """
         Get dashboard statistics with optional date filters.
         """
-        import random
-        print(f"DEBUG: DashboardStatsAPIView reached. User: {request.user}, Auth: {request.auth}")
-        
-        # 1. Stats Cards
-        total_students_count = random.randint(1200, 1300)
-        attendance_percent = round(random.uniform(92.0, 98.0), 1)
-        fee_collection = f"{random.randint(6, 9)}.{random.randint(1, 9)}M"
-        fee_defaulters = random.randint(30, 60)
-        
+        today = timezone.now().date()
+
+        # 1. Stats Cards — real DB queries
+        total_students_count = Student.objects.count()
+
+        # Today's session attendance (graceful fallback if model unavailable)
+        try:
+            from student_management.models.class_session import SessionAttendance
+            total_today = SessionAttendance.objects.filter(date=today).count()
+            present_today = SessionAttendance.objects.filter(date=today, status='present').count()
+            attendance_percent = round((present_today / total_today * 100), 1) if total_today > 0 else 0.0
+        except Exception:
+            attendance_percent = 0.0
+
+        # Fee collection this month and defaulters (graceful fallback if model unavailable)
+        try:
+            from fees.models import FeeInvoice
+            month_start = today.replace(day=1)
+            paid_total = FeeInvoice.objects.filter(
+                updated_at__date__gte=month_start
+            ).aggregate(total=Sum('paid_amount'))['total'] or 0
+            if paid_total >= 1_000_000:
+                fee_collection = f"{paid_total / 1_000_000:.1f}M"
+            elif paid_total >= 1_000:
+                fee_collection = f"{paid_total / 1_000:.0f}K"
+            else:
+                fee_collection = str(paid_total)
+            fee_defaulters = FeeInvoice.objects.filter(
+                balance__gt=0
+            ).values('student').distinct().count()
+        except Exception:
+            fee_collection = "0"
+            fee_defaulters = 0
+
         stats = [
-            { 
-                "title": 'Total Students', 
-                "count": f"{total_students_count:,}", 
-                "trend": round(random.uniform(1.0, 5.0), 1), 
-                "trendLabel": 'from last term', 
-                "icon": 'users', 
-                "color": '#e3f2fd', 
-                "iconColor": '#2196f3' 
+            {
+                "title": 'Total Students',
+                "count": f"{total_students_count:,}",
+                "trend": 0,
+                "trendLabel": 'enrolled students',
+                "icon": 'users',
+                "color": '#e3f2fd',
+                "iconColor": '#2196f3'
             },
-            { 
-                "title": "Today's Attendance", 
-                "count": f"{attendance_percent}%", 
-                "trend": round(random.uniform(0.5, 3.0), 1), 
-                "trendLabel": 'from yesterday', 
-                "icon": 'user-check', 
-                "color": '#e8f5e9', 
-                "iconColor": '#4caf50' 
+            {
+                "title": "Today's Attendance",
+                "count": f"{attendance_percent}%",
+                "trend": 0,
+                "trendLabel": 'present today',
+                "icon": 'user-check',
+                "color": '#e8f5e9',
+                "iconColor": '#4caf50'
             },
-            { 
-                "title": 'Fee Collection', 
-                "count": f"KES {fee_collection}", 
-                "trend": round(random.uniform(5.0, 15.0), 1), 
-                "trendLabel": 'this month', 
-                "icon": 'credit-card', 
-                "color": '#fff3e0', 
-                "iconColor": '#ff9800' 
+            {
+                "title": 'Fee Collection',
+                "count": f"KES {fee_collection}",
+                "trend": 0,
+                "trendLabel": 'this month',
+                "icon": 'credit-card',
+                "color": '#fff3e0',
+                "iconColor": '#ff9800'
             },
-            { 
-                "title": 'Fee Defaulters', 
-                "count": str(fee_defaulters), 
-                "trend": round(random.uniform(-10.0, -2.0), 1), 
-                "trendLabel": 'from last week', 
-                "icon": 'alert-triangle', 
-                "color": '#ffebee', 
-                "iconColor": '#f44336' 
+            {
+                "title": 'Fee Defaulters',
+                "count": str(fee_defaulters),
+                "trend": 0,
+                "trendLabel": 'outstanding balance',
+                "icon": 'alert-triangle',
+                "color": '#ffebee',
+                "iconColor": '#f44336'
             },
         ]
-        
+
         # 2. Charts Data
-        # Weekly Attendance
-        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+        # Weekly Attendance — real daily counts for Mon–Fri of current week
+        week_start = today - timedelta(days=today.weekday())
+        days_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
         weekly_attendance = []
-        for day in days:
-            present = random.randint(800, 900)
-            absent = 900 - present # Assuming base of 900 for chart
-            weekly_attendance.append({
-                "name": day,
-                "present": present,
-                "absent": absent
-            })
+        for i, label in enumerate(days_labels):
+            day_date = week_start + timedelta(days=i)
+            try:
+                from student_management.models.class_session import SessionAttendance
+                present = SessionAttendance.objects.filter(date=day_date, status='present').count()
+                absent = SessionAttendance.objects.filter(date=day_date, status='absent').count()
+            except Exception:
+                present = 0
+                absent = 0
+            weekly_attendance.append({"name": label, "present": present, "absent": absent})
+
+        # Fee Collection Pie Chart — real totals for current term
+        try:
+            from fees.models import FeeInvoice
+            from student_settings.models import Term
             
-        # Fee Collection Pie Chart
-        fee_collected = round(random.uniform(6.0, 8.0), 1)
-        fee_pending = round(random.uniform(1.0, 2.5), 1)
-        fee_overdue = round(random.uniform(0.5, 1.0), 1)
-        
+            # Get current term
+            current_term = Term.objects.filter(is_current=True).select_related('academic_year').first()
+            current_term_name = f"{current_term.name}, {current_term.academic_year.name}" if current_term else "Current Term"
+            
+            # Filter by current term if available
+            if current_term:
+                agg = FeeInvoice.objects.filter(term=current_term).aggregate(
+                    collected=Sum('paid_amount'),
+                    total_billed=Sum('total_amount'),
+                )
+            else:
+                agg = FeeInvoice.objects.aggregate(
+                    collected=Sum('paid_amount'),
+                    total_billed=Sum('total_amount'),
+                )
+            total_billed = float(agg['total_billed'] or 0)
+            fee_collected_val = float(agg['collected'] or 0)
+            fee_pending_val = max(0.0, round(total_billed - fee_collected_val, 2))
+            fee_overdue_val = 0.0  # requires due_date check; placeholder
+        except Exception:
+            fee_collected_val = 0.0
+            fee_pending_val = 0.0
+            fee_overdue_val = 0.0
+            current_term_name = "Current Term"
+
         fee_collection_chart = [
-            { "name": 'Collected', "value": fee_collected, "color": '#4caf50' },
-            { "name": 'Pending', "value": fee_pending, "color": '#ff9800' },
-            { "name": 'Overdue', "value": fee_overdue, "color": '#f44336' },
+            {"name": 'Collected', "value": fee_collected_val, "color": '#4caf50'},
+            {"name": 'Pending', "value": fee_pending_val, "color": '#ff9800'},
+            {"name": 'Overdue', "value": fee_overdue_val, "color": '#f44336'},
         ]
         
         # 3. Recent Activity (Mock)
@@ -194,7 +247,8 @@ class DashboardStatsAPIView(APIView):
             "user": user_data,
             "charts": {
                 "weekly_attendance": weekly_attendance,
-                "fee_collection": fee_collection_chart
+                "fee_collection": fee_collection_chart,
+                "current_term": current_term_name
             },
             "recent_activity": recent_activity,
             "upcoming_events": upcoming_events
