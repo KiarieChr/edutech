@@ -201,7 +201,7 @@ class DarajaService:
     # ── Callback handler ─────────────────────────────────────────────────────
 
     @staticmethod
-    def handle_stk_callback(payload: dict) -> PaymentTransaction | None:
+    def handle_stk_callback(payload: dict) -> 'PaymentTransaction | None':
         """
         Process the callback POST that Safaricom sends to `callback_url`.
         Updates the matching PaymentTransaction row.

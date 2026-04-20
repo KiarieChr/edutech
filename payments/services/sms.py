@@ -43,7 +43,7 @@ class _BaseSMS:
     def send(self, recipient: str, message: str) -> SMSLog:
         raise NotImplementedError
 
-    def send_bulk(self, recipients: list[str], message: str) -> list[SMSLog]:
+    def send_bulk(self, recipients: list, message: str) -> list:
         return [self.send(r, message) for r in recipients]
 
     def _log(self, recipient, message, status='queued', message_id='', cost='', failure_reason='') -> SMSLog:
@@ -225,7 +225,7 @@ class SMSService:
     def send(self, recipient: str, message: str) -> SMSLog:
         return self._backend.send(recipient, message)
 
-    def send_bulk(self, recipients: list[str], message: str) -> list[SMSLog]:
+    def send_bulk(self, recipients: list, message: str) -> list:
         return self._backend.send_bulk(recipients, message)
 
     # ── Templated messages ────────────────────────────────────────────────────
