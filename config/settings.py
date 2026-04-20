@@ -33,7 +33,7 @@ ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
 
-ENVIRONMENT = 'development'
+ENVIRONMENT = 'production'
 # Application definition
 
 DJANGO_APPS = [
@@ -222,7 +222,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https//api.royalsoftwares.co.ke"
+    "https://api.royalsoftwares.co.ke"
 ]
 
 
@@ -352,10 +352,12 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 # CORS Configuration
 if ENVIRONMENT == 'production':
     CORS_ALLOWED_ORIGINS = [
-        "https://your-react-app.com",
-        "https://www.your-react-app.com",
+        "https://fahari.royalsoftwares.co.ke",
     ]
-    CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
+    CSRF_TRUSTED_ORIGINS = [
+        "https://fahari.royalsoftwares.co.ke",
+        "https://api.royalsoftwares.co.ke",
+    ]
     
 elif ENVIRONMENT == 'staging':
     CORS_ALLOWED_ORIGINS = [
