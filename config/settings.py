@@ -28,7 +28,7 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.58','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12']
+ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.58','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12','api.royalsoftwares.co.ke','www.api.royalsoftwares.co.ke']
 
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
