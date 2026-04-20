@@ -62,6 +62,7 @@ class ClassSession(models.Model):
         ordering = ['academic_year__start_date', 'term__start_date', 'grade__level_order']
         verbose_name = "Class Session"
         verbose_name_plural = "Class Sessions"
+        db_table = 'class_sessions'
 
     def __str__(self):
         return self.name
@@ -169,6 +170,7 @@ class StudentSessionEnrollment(models.Model):
             models.Index(fields=['student', 'is_active']),
             models.Index(fields=['session', 'status']),
         ]
+        db_table = 'student_session_enrollments'
 
     def __str__(self):
         return f"{self.student} - {self.session.name}"

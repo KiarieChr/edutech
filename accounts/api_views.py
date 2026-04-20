@@ -6,6 +6,8 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.authtoken.models import Token
+from .authentication import UserTokenAuthentication
+from .models import UserToken
 from rest_framework.pagination import PageNumberPagination
 from django.contrib.auth import update_session_auth_hash, login, authenticate, logout
 from django.contrib.sessions.models import Session
@@ -15,7 +17,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext_lazy as _
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, F, When, Case, IntegerField
+from django.db.models import Avg, Count, Q, F, When, Case, IntegerField, Sum
 from django.db.models.functions import TruncMonth, TruncDay, TruncWeek
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -79,130 +81,300 @@ class DebugDashboardView(APIView):
 
 class DashboardStatsAPIView(APIView):
     """
-    API endpoint for users dashboard statistics.
-    Returns comprehensive statistics for the admin dashboard.
+    API endpoint for admin dashboard statistics.
+    All data is fetched from the database — nothing is mocked.
     """
-    
-    # authentication_classes = [] # Removed to allow TokenAuthentication
+
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
-        """
-        Get dashboard statistics with optional date filters.
-        """
-        import random
-        print(f"DEBUG: DashboardStatsAPIView reached. User: {request.user}, Auth: {request.auth}")
-        
-        # 1. Stats Cards
-        total_students_count = random.randint(1200, 1300)
-        attendance_percent = round(random.uniform(92.0, 98.0), 1)
-        fee_collection = f"{random.randint(6, 9)}.{random.randint(1, 9)}M"
-        fee_defaulters = random.randint(30, 60)
-        
-        stats = [
-            { 
-                "title": 'Total Students', 
-                "count": f"{total_students_count:,}", 
-                "trend": round(random.uniform(1.0, 5.0), 1), 
-                "trendLabel": 'from last term', 
-                "icon": 'users', 
-                "color": '#e3f2fd', 
-                "iconColor": '#2196f3' 
-            },
-            { 
-                "title": "Today's Attendance", 
-                "count": f"{attendance_percent}%", 
-                "trend": round(random.uniform(0.5, 3.0), 1), 
-                "trendLabel": 'from yesterday', 
-                "icon": 'user-check', 
-                "color": '#e8f5e9', 
-                "iconColor": '#4caf50' 
-            },
-            { 
-                "title": 'Fee Collection', 
-                "count": f"KES {fee_collection}", 
-                "trend": round(random.uniform(5.0, 15.0), 1), 
-                "trendLabel": 'this month', 
-                "icon": 'credit-card', 
-                "color": '#fff3e0', 
-                "iconColor": '#ff9800' 
-            },
-            { 
-                "title": 'Fee Defaulters', 
-                "count": str(fee_defaulters), 
-                "trend": round(random.uniform(-10.0, -2.0), 1), 
-                "trendLabel": 'from last week', 
-                "icon": 'alert-triangle', 
-                "color": '#ffebee', 
-                "iconColor": '#f44336' 
-            },
-        ]
-        
-        # 2. Charts Data
-        # Weekly Attendance
-        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-        weekly_attendance = []
-        for day in days:
-            present = random.randint(800, 900)
-            absent = 900 - present # Assuming base of 900 for chart
-            weekly_attendance.append({
-                "name": day,
-                "present": present,
-                "absent": absent
-            })
-            
-        # Fee Collection Pie Chart
-        fee_collected = round(random.uniform(6.0, 8.0), 1)
-        fee_pending = round(random.uniform(1.0, 2.5), 1)
-        fee_overdue = round(random.uniform(0.5, 1.0), 1)
-        
-        fee_collection_chart = [
-            { "name": 'Collected', "value": fee_collected, "color": '#4caf50' },
-            { "name": 'Pending', "value": fee_pending, "color": '#ff9800' },
-            { "name": 'Overdue', "value": fee_overdue, "color": '#f44336' },
-        ]
-        
-        # 3. Recent Activity (Mock)
-        recent_activity = [
-            { "id": 1, "title": 'New Student Enrolled', "desc": 'John Doe was enrolled in Class 9', "time": '5 minutes ago', "icon": 'user-plus', "color": '#e3f2fd' },
-            { "id": 2, "title": 'Fee Payment Received', "desc": 'KES 45,000 received from...', "time": '15 minutes ago', "icon": 'credit-card', "color": '#fff3e0' },
-            { "id": 3, "title": 'Report Cards Generated', "desc": 'Term 1 reports for Class 9', "time": '1 hour ago', "icon": 'file-text', "color": '#e8f5e9' },
-            { "id": 4, "title": 'Staff Meeting Reminder', "desc": 'January payroll processed', "time": '2 hours ago', "icon": 'bell', "color": '#e3f2fd' },
-        ]
+        today = timezone.now().date()
+        now = timezone.now()
 
-        # 4. Upcoming Events (Mock)
-        upcoming_events = [
-            { "id": 1, "title": 'Mid-Term Examinations', "date": 'Feb 15, 2026', "time": '8:00 AM', "location": 'All Classrooms', "color": '#4caf50' },
-            { "id": 2, "title": 'Parent-Teacher Meeting', "date": 'Feb 20, 2026', "time": '2:00 PM', "location": 'School Hall', "color": '#2196f3' },
-            { "id": 3, "title": 'Sports Day', "date": 'Feb 28, 2026', "time": '9:00 AM', "location": 'Sports Ground', "color": '#009688' },
-            { "id": 4, "title": 'Fee Payment Deadline', "date": 'Mar 5, 2026', "time": '5:00 PM', "location": 'Finance Office', "color": '#f44336' },
-        ]
+        # ── helpers ──────────────────────────────────────────────
+        def _fmt(val):
+            """Human‑readable currency shorthand."""
+            if val is None:
+                return "0"
+            val = float(val)
+            if val >= 1_000_000:
+                return f"{val / 1_000_000:.1f}M"
+            if val >= 1_000:
+                return f"{val / 1_000:.0f}K"
+            return f"{val:,.0f}"
 
-        # Prepare response data structure matching frontend expectations
-        user_data = None
-        if request.user and request.user.is_authenticated:
-             user_data = UserSerializer(request.user).data
-        else:
-             # Basic dummy user data for non-authenticated view if needed
-             user_data = {
-                 'id': 0, 'username': 'Guest', 'email': '', 'first_name': 'Guest', 'last_name': 'User'
-             }
-
-        response_data = {
-            "stats": stats,
-            "isAuthenticated": request.user.is_authenticated if request.user else False,
-            "user": user_data,
-            "charts": {
-                "weekly_attendance": weekly_attendance,
-                "fee_collection": fee_collection_chart
-            },
-            "recent_activity": recent_activity,
-            "upcoming_events": upcoming_events
+        ACTIVITY_ICON_MAP = {
+            'login': 'user-check', 'logout': 'user-check',
+            'profile_update': 'users', 'avatar_upload': 'users',
+            'password_change': 'bell', 'permission_change': 'bell',
+            'failed_login': 'alert-triangle', 'account_locked': 'alert-triangle',
+            'account_unlocked': 'check', 'email_verification': 'check',
+            'session_terminate': 'clock',
         }
-        
+        ACTIVITY_COLOR_MAP = {
+            'login': '#e3f2fd', 'logout': '#e3f2fd',
+            'profile_update': '#e8f5e9', 'avatar_upload': '#e8f5e9',
+            'password_change': '#fff3e0', 'permission_change': '#fff3e0',
+            'failed_login': '#ffebee', 'account_locked': '#ffebee',
+            'account_unlocked': '#e8f5e9', 'email_verification': '#e8f5e9',
+            'session_terminate': '#f3e5f5',
+        }
+        EVENT_COLORS = ['#4caf50', '#2196f3', '#009688', '#f44336', '#ff9800', '#9c27b0']
+
+        # ── 1. stat cards ────────────────────────────────────────
+        total_students = Student.objects.count()
+        active_students = Student.objects.filter(status='active').count()
+
+        # Attendance
+        try:
+            from student_management.models.class_session import SessionAttendance
+            att_today = SessionAttendance.objects.filter(date=today).count()
+            att_present = SessionAttendance.objects.filter(date=today, status='present').count()
+            attendance_pct = round(att_present / att_today * 100, 1) if att_today else 0.0
+        except Exception:
+            attendance_pct = 0.0
+
+        # Fees
+        try:
+            from fees.models import FeeInvoice
+            month_start = today.replace(day=1)
+            paid_this_month = FeeInvoice.objects.filter(
+                updated_at__date__gte=month_start
+            ).aggregate(t=Sum('paid_amount'))['t'] or 0
+            fee_defaulters = FeeInvoice.objects.filter(
+                balance__gt=0
+            ).values('student').distinct().count()
+        except Exception:
+            paid_this_month = 0
+            fee_defaulters = 0
+
+        # Staff
+        try:
+            from workforce.core_models import Employee
+            total_staff = Employee.objects.count()
+            active_staff = Employee.objects.filter(employment_status='active').count()
+        except Exception:
+            total_staff = 0
+            active_staff = 0
+
+        # Departments
+        try:
+            from workforce.models import Department
+            dept_count = Department.objects.count()
+        except Exception:
+            dept_count = 0
+
+        # New students this month
+        month_start_dt = today.replace(day=1)
+        new_students_month = Student.objects.filter(
+            admission_date__gte=month_start_dt
+        ).count()
+
+        stats = [
+            {"title": "Total Students", "count": f"{total_students:,}", "trend": 0,
+             "trendLabel": "enrolled students", "icon": "users",
+             "color": "#e3f2fd", "iconColor": "#2196f3"},
+            {"title": "Today's Attendance", "count": f"{attendance_pct}%", "trend": 0,
+             "trendLabel": "present today", "icon": "user-check",
+             "color": "#e8f5e9", "iconColor": "#4caf50"},
+            {"title": "Fee Collection", "count": f"KES {_fmt(paid_this_month)}", "trend": 0,
+             "trendLabel": "this month", "icon": "credit-card",
+             "color": "#fff3e0", "iconColor": "#ff9800"},
+            {"title": "Fee Defaulters", "count": str(fee_defaulters), "trend": 0,
+             "trendLabel": "outstanding balance", "icon": "alert-triangle",
+             "color": "#ffebee", "iconColor": "#f44336"},
+            # ── secondary stats ──
+            {"title": "Active Students", "count": f"{active_students:,}", "trend": 0,
+             "trendLabel": "currently active", "icon": "users",
+             "color": "#e0f2f1", "iconColor": "#009688"},
+            {"title": "New This Month", "count": str(new_students_month), "trend": 0,
+             "trendLabel": "admissions", "icon": "user-plus",
+             "color": "#e8eaf6", "iconColor": "#3f51b5"},
+            {"title": "Total Staff", "count": str(total_staff), "trend": 0,
+             "trendLabel": f"{active_staff} active", "icon": "users",
+             "color": "#fce4ec", "iconColor": "#e91e63"},
+            {"title": "Departments", "count": str(dept_count), "trend": 0,
+             "trendLabel": "organisational units", "icon": "book",
+             "color": "#f3e5f5", "iconColor": "#9c27b0"},
+        ]
+
+        # ── 2. charts ───────────────────────────────────────────
+        # Weekly attendance
+        week_start = today - timedelta(days=today.weekday())
+        weekly_attendance = []
+        for i, label in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']):
+            day_date = week_start + timedelta(days=i)
+            try:
+                from student_management.models.class_session import SessionAttendance
+                present = SessionAttendance.objects.filter(date=day_date, status='present').count()
+                absent = SessionAttendance.objects.filter(date=day_date, status='absent').count()
+            except Exception:
+                present, absent = 0, 0
+            weekly_attendance.append({"name": label, "present": present, "absent": absent})
+
+        # Fee collection pie (current term)
+        current_term_name = "Current Term"
+        fee_collected_val = fee_pending_val = fee_overdue_val = 0.0
+        try:
+            from fees.models import FeeInvoice
+            from student_settings.models import Term
+            current_term = Term.objects.filter(is_current=True).select_related('academic_year').first()
+            if current_term:
+                current_term_name = f"{current_term.name}, {current_term.academic_year.name}"
+                inv_qs = FeeInvoice.objects.filter(term=current_term)
+            else:
+                inv_qs = FeeInvoice.objects.all()
+            agg = inv_qs.aggregate(collected=Sum('paid_amount'), billed=Sum('total_amount'))
+            billed = float(agg['billed'] or 0)
+            fee_collected_val = float(agg['collected'] or 0)
+            fee_pending_val = max(0.0, round(billed - fee_collected_val, 2))
+            # Overdue = balance on invoices past due date
+            fee_overdue_val = float(
+                inv_qs.filter(due_date__lt=today, balance__gt=0)
+                .aggregate(t=Sum('balance'))['t'] or 0
+            )
+        except Exception:
+            pass
+
+        fee_collection_chart = [
+            {"name": "Collected", "value": fee_collected_val, "color": "#4caf50"},
+            {"name": "Pending", "value": fee_pending_val, "color": "#ff9800"},
+            {"name": "Overdue", "value": fee_overdue_val, "color": "#f44336"},
+        ]
+
+        # Performance chart — average marks per subject (latest published exams)
+        performance_data = []
+        try:
+            from examinations.models import TermSubjectResult
+            from django.db.models import Avg
+            subj_avgs = (
+                TermSubjectResult.objects
+                .filter(term_result__is_published=True)
+                .values('subject__name')
+                .annotate(avg_mark=Avg('weighted_mark'))
+                .order_by('-avg_mark')[:10]
+            )
+            for row in subj_avgs:
+                performance_data.append({
+                    "subject": row['subject__name'],
+                    "score": round(float(row['avg_mark'] or 0), 1),
+                    "average": round(float(row['avg_mark'] or 0), 1),
+                    "max": 100,
+                })
+        except Exception:
+            pass
+
+        # Enrollment chart — monthly new students for the last 6 months
+        enrollment_data = []
+        try:
+            six_months_ago = today - timedelta(days=180)
+            monthly = (
+                Student.objects
+                .filter(admission_date__gte=six_months_ago)
+                .annotate(month=TruncMonth('admission_date'))
+                .values('month')
+                .annotate(count=Count('id'))
+                .order_by('month')
+            )
+            # Build a complete 6‑month series
+            for offset in range(6):
+                m = (today.replace(day=1) - relativedelta(months=5 - offset))
+                label = m.strftime('%b')
+                actual = 0
+                for row in monthly:
+                    if row['month'] and row['month'].month == m.month and row['month'].year == m.year:
+                        actual = row['count']
+                        break
+                enrollment_data.append({
+                    "month": label,
+                    "enrollments": actual,
+                    "target": 0,
+                })
+        except Exception:
+            pass
+
+        # ── 3. recent activity (from DB) ─────────────────────────
+        recent_activity = []
+        try:
+            activities = Activity.objects.select_related('user').order_by('-timestamp')[:8]
+            for act in activities:
+                delta = now - act.timestamp
+                if delta.days > 0:
+                    time_ago = f"{delta.days} day{'s' if delta.days > 1 else ''} ago"
+                elif delta.seconds >= 3600:
+                    hrs = delta.seconds // 3600
+                    time_ago = f"{hrs} hour{'s' if hrs > 1 else ''} ago"
+                elif delta.seconds >= 60:
+                    mins = delta.seconds // 60
+                    time_ago = f"{mins} minute{'s' if mins > 1 else ''} ago"
+                else:
+                    time_ago = "just now"
+                user_name = act.user.get_full_name() or act.user.username if act.user else "System"
+                recent_activity.append({
+                    "id": act.id,
+                    "title": act.get_activity_type_display() if hasattr(act, 'get_activity_type_display') else act.activity_type.replace('_', ' ').title(),
+                    "desc": act.description or f"{user_name} — {act.activity_type}",
+                    "time": time_ago,
+                    "icon": ACTIVITY_ICON_MAP.get(act.activity_type, 'bell'),
+                    "color": ACTIVITY_COLOR_MAP.get(act.activity_type, '#e3f2fd'),
+                })
+        except Exception:
+            pass
+
+        # ── 4. upcoming events (from DB) ─────────────────────────
+        upcoming_events = []
+        try:
+            from core.models import NewsAndEvents
+            events_qs = (
+                NewsAndEvents.objects
+                .filter(posted_as='Event')
+                .order_by('-updated_date')[:6]
+            )
+            for idx, evt in enumerate(events_qs):
+                dt = evt.updated_date or evt.upload_time
+                upcoming_events.append({
+                    "id": evt.id,
+                    "title": evt.title,
+                    "date": dt.strftime('%b %d, %Y') if dt else '',
+                    "time": dt.strftime('%I:%M %p') if dt else '',
+                    "location": '',
+                    "color": EVENT_COLORS[idx % len(EVENT_COLORS)],
+                })
+        except Exception:
+            pass
+
+        # ── 5. resource usage (real counts) ──────────────────────
+        active_users = User.objects.filter(is_active=True).count()
+        total_users = User.objects.count()
+        resource_usage = {
+            "storage": {"used": 0, "total": 0, "unit": "GB"},
+            "bandwidth": {"used": 0, "total": 0, "unit": "GB"},
+            "activeUsers": {"count": active_users, "total": total_users},
+            "serverLoad": {"percentage": 0},
+        }
+
+        # ── response ────────────────────────────────────────────
+        user_data = UserSerializer(request.user).data if request.user.is_authenticated else {
+            'id': 0, 'username': 'Guest', 'email': '', 'first_name': 'Guest', 'last_name': 'User'
+        }
+
         return Response({
             'success': True,
-            'data': response_data,
+            'data': {
+                "stats": stats,
+                "isAuthenticated": request.user.is_authenticated,
+                "user": user_data,
+                "charts": {
+                    "weekly_attendance": weekly_attendance,
+                    "fee_collection": fee_collection_chart,
+                    "current_term": current_term_name,
+                    "performance": performance_data,
+                    "enrollment": enrollment_data,
+                },
+                "recent_activity": recent_activity,
+                "upcoming_events": upcoming_events,
+                "resource_usage": resource_usage,
+            },
             'message': _('Dashboard statistics retrieved successfully'),
         })
 # Custom Pagination
@@ -251,10 +423,12 @@ class LoginAPIView(APIView):
             if user.is_first_login:
                 # Store user_id in session for first-time setup
                 request.session['first_time_user_id'] = user.id
+                user_token = UserToken.create_for_user(user, request)
                 return Response({
                     'success': True,
                     'message': _("Welcome! Please complete your profile setup to continue."),
                     'requires_setup': True,
+                    'token': user_token.key,
                     'user_id': user.id,
                     'user_email': user.email
                 }, status=status.HTTP_200_OK)
@@ -278,12 +452,12 @@ class LoginAPIView(APIView):
             )
 
             
-            token, created = Token.objects.get_or_create(user=user)
+            user_token = UserToken.create_for_user(user, request)
             
             return Response({
                 'success': True,
                 'message': _("Welcome back, {}!").format(user.get_full_name),
-                'token': token.key,
+                'token': user_token.key,
                 'user': UserSerializer(user).data,
                 'requires_setup': False
             }, status=status.HTTP_200_OK)       
@@ -354,6 +528,25 @@ class FirstTimeSetupAPIView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
     
+    @staticmethod
+    def generate_default_email(user):
+        """Generate a unique default email from the user's name/username."""
+        import re
+        base = user.username or ''
+        if user.first_name:
+            base = user.first_name.lower()
+            if user.last_name:
+                base = f"{base}.{user.last_name.lower()}"
+        # Sanitize: keep only alphanumeric, dots, hyphens
+        base = re.sub(r'[^a-z0-9.\-]', '', base) or f"user{user.pk}"
+        candidate = f"{base}@fahari.academy"
+        # Ensure uniqueness
+        counter = 1
+        while User.objects.filter(email__iexact=candidate).exclude(pk=user.pk).exists():
+            candidate = f"{base}{counter}@fahari.academy"
+            counter += 1
+        return candidate
+    
     def get_user_id(self, request):
         """Get user_id from various sources"""
         # Try session first
@@ -394,12 +587,23 @@ class FirstTimeSetupAPIView(APIView):
                 'message': _("You have already completed the setup.")
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Check if current email conflicts with another user
+        current_email = user.email or ''
+        email_conflict = False
+        suggested_email = current_email
+        if current_email and User.objects.filter(email__iexact=current_email).exclude(pk=user.pk).exists():
+            email_conflict = True
+            suggested_email = self.generate_default_email(user)
+        elif not current_email:
+            suggested_email = self.generate_default_email(user)
+        
         return Response({
             'success': True,
             'requires_setup': True,
+            'email_conflict': email_conflict,
             'user': {
                 'id': user.id,
-                'current_email': user.email,
+                'current_email': suggested_email,
                 'current_username': user.username,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
@@ -443,9 +647,12 @@ class FirstTimeSetupAPIView(APIView):
             # Update user data
             data = serializer.validated_data
             
-            # Update email if provided and different
-            if data.get('email') and data['email'] != user.email:
-                user.email = data['email']
+            # Update email - auto-generate if blank/missing
+            email = (data.get('email') or '').strip()
+            if email and email != user.email:
+                user.email = email
+            elif not email:
+                user.email = self.generate_default_email(user)
             
             # Update username if provided and different
             if data.get('username') and data['username'] != user.username:
@@ -475,12 +682,12 @@ class FirstTimeSetupAPIView(APIView):
             request.session.save()
             
             # Create token for API authentication
-            token, created = Token.objects.get_or_create(user=user)
+            user_token = UserToken.create_for_user(user, request)
             
             return Response({
                 'success': True,
                 'message': _("Your profile has been set up successfully!"),
-                'token': token.key,
+                'token': user_token.key,
                 'user': UserSerializer(user).data,
                 'requires_setup': False
             }, status=status.HTTP_200_OK)
@@ -511,13 +718,24 @@ class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        # Delete token if using token authentication
-        try:
-            request.user.auth_token.delete()
-        except (AttributeError, Token.DoesNotExist):
-            pass
+        # Revoke the current UserToken (per-session token)
+        auth = request.auth
+        if isinstance(auth, UserToken):
+            auth.delete()
+        else:
+            # Fallback: delete legacy DRF token if present
+            try:
+                request.user.auth_token.delete()
+            except (AttributeError, Token.DoesNotExist):
+                pass
         
         logout(request)
+        Activity.log_activity(
+            user=request.user,
+            activity_type='logout',
+            request=request,
+            description='User logged out',
+        )
         return Response({
             'success': True,
             'message': _("Successfully logged out.")
@@ -533,6 +751,19 @@ class UserViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['email', 'username', 'first_name', 'last_name', 'phone']
     ordering_fields = ['date_joined', 'last_login', 'email', 'username']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+        is_first_login = self.request.query_params.get('is_first_login')
+        if is_first_login is not None:
+            qs = qs.filter(is_first_login=is_first_login.lower() in ('true', '1'))
+        is_lecturer = self.request.query_params.get('is_lecturer')
+        if is_lecturer is not None:
+            qs = qs.filter(is_lecturer=is_lecturer.lower() in ('true', '1'))
+        return qs
     
     def get_permissions(self):
         """
@@ -747,51 +978,49 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def sessions(self, request):
-        """Get active sessions for the current user"""
-        sessions = Session.objects.filter(expire_date__gt=timezone.now())
-        user_sessions = []
-        current_session_key = request.session.session_key
+        """Get active sessions for the current user (one UserToken per login)."""
+        current_token_id = request.auth.id if isinstance(request.auth, UserToken) else None
 
-        for s in sessions:
-            data = s.get_decoded()
-            if data.get('_auth_user_id') == str(request.user.id):
-                ua_string = data.get('user_agent', '')
-                user_agent = user_agents.parse(ua_string) if ua_string else None
-                
-                session_info = {
-                    'session_key': s.session_key,
-                    'device': user_agent.device.family if user_agent else 'Unknown Device',
-                    'browser': f"{user_agent.browser.family} {user_agent.browser.version_string}" if user_agent else 'Unknown Browser',
-                    'os': f"{user_agent.os.family} {user_agent.os.version_string}" if user_agent else 'Unknown OS',
-                    'ip': data.get('ip_address', 'Unknown'),
-                    'expire_date': s.expire_date,
-                    'current': s.session_key == current_session_key
-                }
-                user_sessions.append(session_info)
+        tokens = UserToken.objects.filter(user=request.user)
+        user_sessions = [
+            {
+                'id': t.id,
+                'session_key': str(t.id),  # kept for frontend compat
+                'device': t.device or 'Unknown Device',
+                'browser': t.browser or 'Unknown Browser',
+                'os': t.os or 'Unknown OS',
+                'ip': t.ip_address or 'Unknown',
+                'created_at': t.created_at,
+                'last_used': t.last_used,
+                'expire_date': t.last_used,  # alias for legacy serializer field
+                'current': t.id == current_token_id,
+                'label': t.label,
+            }
+            for t in tokens
+        ]
 
-        serializer = UserSessionSerializer(user_sessions, many=True)
         return Response({
             'success': True,
-            'sessions': serializer.data
+            'sessions': user_sessions,
         })
 
     @action(detail=False, methods=['post'])
     def terminate_session(self, request):
-        """Terminate a specific session"""
-        session_key = request.data.get('session_key')
-        if not session_key:
-            return Response({'success': False, 'message': 'Session key is required'}, status=400)
+        """Terminate a specific UserToken session."""
+        token_id = request.data.get('token_id') or request.data.get('session_key')
+        if not token_id:
+            return Response({'success': False, 'message': 'token_id is required'}, status=400)
         
-        try:
-            session = Session.objects.get(session_key=session_key)
-            data = session.get_decoded()
-            if data.get('_auth_user_id') == str(request.user.id):
-                session.delete()
-                return Response({'success': True, 'message': 'Session terminated successfully'})
-            else:
-                return Response({'success': False, 'message': 'Unauthorized'}, status=403)
-        except Session.DoesNotExist:
-            return Response({'success': False, 'message': 'Session not found'}, status=404)
+        deleted, _ = UserToken.objects.filter(id=token_id, user=request.user).delete()
+        if deleted:
+            Activity.log_activity(
+                user=request.user,
+                activity_type='session_terminate',
+                request=request,
+                description=f'Session {token_id} terminated',
+            )
+            return Response({'success': True, 'message': 'Session terminated successfully'})
+        return Response({'success': False, 'message': 'Session not found'}, status=404)
 
     @action(detail=False, methods=['post'])
     def upload_avatar(self, request):
@@ -823,34 +1052,24 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def logout_all(self, request):
-        """Terminate all active sessions for current user"""
-        sessions = Session.objects.filter(expire_date__gt=timezone.now())
-        count = 0
+        """Terminate ALL UserToken sessions for the current user."""
+        current_token_id = request.auth.id if isinstance(request.auth, UserToken) else None
+        qs = UserToken.objects.filter(user=request.user)
+        count = qs.count()
+        qs.delete()
         
-        for s in sessions:
-            try:
-                data = s.get_decoded()
-                if data.get('_auth_user_id') == str(request.user.id):
-                    s.delete()
-                    count += 1
-            except:
-                pass
-        
-        # Log the activity
-        from .models import Activity
         Activity.log_activity(
             user=request.user,
             activity_type='logout',
             request=request,
-            description=f'Logged out from {count} sessions'
+            description=f'Logged out from all {count} sessions',
         )
         
-        # Also flush current session
-        request.session.flush()
+        logout(request)
         
         return Response({
             'success': True,
-            'message': f'Successfully logged out from {count} sessions'
+            'message': f'Successfully logged out from {count} sessions',
         })
 
     @action(detail=False, methods=['get'])
@@ -878,6 +1097,42 @@ class UserViewSet(viewsets.ModelViewSet):
             'activities': serializer.data,
             'count': len(serializer.data)
         })
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
+    def assign_roles(self, request, pk=None):
+        """Assign roles (groups) to a user. Expects { group_ids: [1, 2, 3] }"""
+        user = self.get_object()
+        group_ids = request.data.get('group_ids', [])
+        groups = Group.objects.filter(id__in=group_ids)
+        user.groups.set(groups)
+        return Response({
+            'success': True,
+            'message': f'Roles updated for {user.get_full_name or user.username}',
+            'groups': GroupSerializer(user.groups.all(), many=True).data
+        })
+
+    @action(detail=True, methods=['get', 'post'], permission_classes=[IsAdminUser])
+    def user_permissions(self, request, pk=None):
+        """GET: list all permissions for user. POST: assign direct permissions. { permission_ids: [...] }"""
+        user = self.get_object()
+        if request.method == 'GET':
+            all_perms = user.get_all_permissions()
+            group_perms = user.get_group_permissions()
+            direct_perms = PermissionSerializer(user.user_permissions.all(), many=True).data
+            return Response({
+                'all_permissions': sorted(list(all_perms)),
+                'group_permissions': sorted(list(group_perms)),
+                'direct_permissions': direct_perms,
+            })
+        else:
+            perm_ids = request.data.get('permission_ids', [])
+            perms = Permission.objects.filter(id__in=perm_ids)
+            user.user_permissions.set(perms)
+            return Response({
+                'success': True,
+                'message': f'Permissions updated for {user.get_full_name or user.username}',
+                'direct_permissions': PermissionSerializer(user.user_permissions.all(), many=True).data
+            })
 
 
 class ForgotPasswordAPIView(APIView):
@@ -989,6 +1244,43 @@ class ValidateEmailAPIView(APIView):
         })
 
 
+class CheckGuardianEmailAPIView(APIView):
+    """Check if a guardian/parent account already exists for the given email."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        email = request.GET.get('email', '').strip()
+        if not email:
+            return Response({
+                'exists': False,
+                'message': 'Email is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from accounts.models import Parent
+        parent = Parent.objects.select_related('user', 'student').filter(
+            user__email__iexact=email, user__is_parent=True
+        ).first()
+
+        if parent:
+            return Response({
+                'exists': True,
+                'parent_user_id': parent.user.id,
+                'parent_name': f"{parent.first_name} {parent.last_name}".strip(),
+                'parent_email': parent.user.email,
+                'parent_phone': parent.phone or '',
+                'linked_students': list(
+                    Parent.objects.filter(user=parent.user)
+                    .values_list('student__admission_number', flat=True)
+                ),
+                'message': 'A parent account with this email already exists.'
+            })
+
+        return Response({
+            'exists': False,
+            'message': 'No existing parent account found for this email.'
+        })
+
+
 class ValidateUsernameAPIView(APIView):
     permission_classes = [permissions.AllowAny]
     
@@ -1045,6 +1337,38 @@ class RoleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return Group.objects.annotate(user_count=Count('user')).order_by('name')
+
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """Get all users in this role"""
+        role = self.get_object()
+        users = role.user_set.all().order_by('first_name', 'last_name')
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def add_members(self, request, pk=None):
+        """Add users to a role. Expects { user_ids: [1, 2, 3] }"""
+        role = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+        users = User.objects.filter(id__in=user_ids)
+        role.user_set.add(*users)
+        return Response({
+            'success': True,
+            'message': f'{users.count()} user(s) added to {role.name}'
+        })
+
+    @action(detail=True, methods=['post'])
+    def remove_members(self, request, pk=None):
+        """Remove users from a role. Expects { user_ids: [1, 2, 3] }"""
+        role = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+        users = User.objects.filter(id__in=user_ids)
+        role.user_set.remove(*users)
+        return Response({
+            'success': True,
+            'message': f'{users.count()} user(s) removed from {role.name}'
+        })
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """

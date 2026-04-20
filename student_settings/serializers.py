@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     AcademicYear, Term, Curriculum, GradeStructure, Stream,
     AdmissionConfig, StudentStatus, PromotionRule, DemographicConfig, SchoolCalendar, Intake,
-    CurriculumLevel
+    CurriculumLevel, LearningArea
 )
 
 class AcademicYearSerializer(serializers.ModelSerializer):
@@ -60,6 +60,18 @@ class CurriculumSerializer(serializers.ModelSerializer):
     class Meta:
         model = Curriculum
         fields = '__all__'
+
+
+class LearningAreaSerializer(serializers.ModelSerializer):
+    subject_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = LearningArea
+        fields = '__all__'
+    
+    def get_subject_count(self, obj):
+        return obj.subjects.filter(is_active=True).count()
+
 
 class CurriculumLevelSerializer(serializers.ModelSerializer):
     curriculum_name = serializers.ReadOnlyField(source='curriculum.name')
@@ -126,6 +138,7 @@ class EnrollmentSerializer(serializers.ModelSerializer):
     curriculum_name = serializers.CharField(source='curriculum.name', read_only=True)
     grade_name = serializers.CharField(source='grade.name', read_only=True)
     stream_name = serializers.CharField(source='stream.name', read_only=True, allow_null=True)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, allow_null=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     enrollment_type_display = serializers.CharField(source='get_enrollment_type_display', read_only=True)
     
@@ -141,7 +154,7 @@ class EnrollmentCreateSerializer(serializers.ModelSerializer):
         model = Enrollment
         fields = [
             'student', 'academic_year', 'term', 'curriculum', 'grade', 'stream',
-            'enrollment_type', 'enrollment_date', 'remarks', 'previous_enrollment',
+            'campus', 'enrollment_type', 'enrollment_date', 'remarks', 'previous_enrollment',
             'stay_status', 'reporting_reason'
         ]
     
@@ -184,7 +197,7 @@ class EnrollmentUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Enrollment
-        fields = ['stream', 'status', 'exit_date', 'remarks', 'is_active']
+        fields = ['stream', 'campus', 'status', 'exit_date', 'remarks', 'is_active']
 
 class EnrollmentTimelineSerializer(serializers.ModelSerializer):
     """Compact serializer for timeline display"""
@@ -201,7 +214,7 @@ class EnrollmentTimelineSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'academic_year', 'term', 'curriculum', 'grade', 'stream',
             'status', 'status_display', 'enrollment_type', 'type_display',
-            'enrollment_date', 'exit_date', 'is_active', 'stay_status'
+            'enrollment_date', 'exit_date', 'is_active', 'stay_status', 'campus'
         ]
 
 class PromotionSerializer(serializers.Serializer):

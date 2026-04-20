@@ -49,6 +49,10 @@ class AcademicYear(BaseModel):
     def __str__(self):
         return self.name
 
+    class Meta:
+        ordering = ['-start_date']
+        db_table = 'academic_years'
+
 class Intake(BaseModel):
     """Represents a cohort of students admitted in a specific academic year"""
     
@@ -124,7 +128,7 @@ class Intake(BaseModel):
         ordering = ['-academic_year__start_date', '-start_date']
         verbose_name = 'Intake'
         verbose_name_plural = 'Intakes'
-    
+        db_table = 'intakes'
     def __str__(self):
         return self.name
     
@@ -159,14 +163,14 @@ class Term(BaseModel):
 
     def __str__(self):
         return f"{self.name} ({self.academic_year.name})"
+    
+    class Meta:
+        ordering = ['academic_year__start_date', 'order']
+        unique_together = ['academic_year', 'order']
+        db_table = 'terms'
 
 class Curriculum(BaseModel):
-    LEVEL_CHOICES = (
-        ('primary', 'Primary'),
-        ('junior_secondary', 'Junior Secondary'),
-        ('senior_secondary', 'Senior Secondary'),
-        ('international', 'International'),
-    )
+   
     STATUS_CHOICES = (
         ('active', 'Active'),
         ('inactive', 'Inactive'),
@@ -175,13 +179,15 @@ class Curriculum(BaseModel):
     name = models.CharField(max_length=100)  # 8-4-4, CBC, IGCSE
     code = models.CharField(max_length=20, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
-    # education_level allows broad categorization, keeping it but CurriculumLevel is more specific
-    education_level = models.CharField(max_length=50, choices=LEVEL_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        ordering = ['name']
+        db_table = 'curriculums'
 
 class CurriculumLevel(BaseModel):
     """Represents a stage within a curriculum (e.g. Primary, JSS, Senior Secondary)"""
@@ -194,9 +200,41 @@ class CurriculumLevel(BaseModel):
     class Meta:
         ordering = ['curriculum', 'order']
         unique_together = ['curriculum', 'name']
+        db_table = 'curriculum_levels'
 
     def __str__(self):
         return f"{self.curriculum.code} - {self.name}"
+
+
+class LearningArea(BaseModel):
+    """Groups subjects into broader categories (Sciences, Languages, Humanities, etc.)"""
+    CATEGORY_CHOICES = (
+        ('sciences', 'Sciences'),
+        ('languages', 'Languages'),
+        ('humanities', 'Humanities'),
+        ('technical', 'Technical/Vocational'),
+        ('arts', 'Creative Arts'),
+        ('pe', 'Physical Education'),
+        ('other', 'Other'),
+    )
+    
+    name = models.CharField(max_length=100, unique=True)  # e.g., Sciences, Languages
+    code = models.CharField(max_length=20, blank=True, null=True)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    description = models.TextField(blank=True, null=True)
+    color_hex = models.CharField(max_length=7, default='#6366f1', help_text="UI color")
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0, help_text="Display order")
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name = 'Learning Area'
+        verbose_name_plural = 'Learning Areas'
+        db_table = 'learning_areas'
+
+    def __str__(self):
+        return self.name
+
 
 class GradeStructure(BaseModel):
     curriculum = models.ForeignKey(Curriculum, on_delete=models.CASCADE, related_name="grades")
@@ -215,6 +253,7 @@ class GradeStructure(BaseModel):
 
     class Meta:
         ordering = ['level_order']
+        db_table = 'grade_structures'
 
     def __str__(self):
         return f"{self.name} ({self.curriculum.name})"
@@ -234,6 +273,11 @@ class Stream(BaseModel):
 
     def __str__(self):
         return f"{self.grade.name} - {self.name}"
+    
+    class Meta:
+        ordering = ['grade__level_order', 'name']
+        unique_together = ['grade', 'name']
+        db_table = 'streams'
 
 class AdmissionConfig(BaseModel):
     ADMISSION_FORMAT_CHOICES = (
@@ -265,7 +309,15 @@ class AdmissionConfig(BaseModel):
     enforce_unique = models.BooleanField(default=True)
     default_status = models.CharField(max_length=20, default='Active')
     allow_mid_term = models.BooleanField(default=True)
+    require_application = models.BooleanField(
+        default=True,
+        help_text='If True, students must have an approved Application before being admitted. '
+                  'Excel bulk import bypasses this requirement.'
+    )
     default_curriculum = models.ForeignKey(Curriculum, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        db_table = 'admission_configs'
 
     def __str__(self):
         return "Global Admission Settings"
@@ -277,6 +329,10 @@ class StudentStatus(BaseModel):
 
     def __str__(self):
         return self.name
+    
+    class Meta:
+        ordering = ['name']
+        db_table = 'student_statuses'
 
 class PromotionRule(BaseModel):
     METHOD_CHOICES = (
@@ -289,6 +345,9 @@ class PromotionRule(BaseModel):
 
     def __str__(self):
         return "Promotion & Progression rules"
+    
+    class Meta:
+        db_table = 'promotion_rules'
 
 class DemographicConfig(BaseModel):
     field_name = models.CharField(max_length=100)
@@ -297,6 +356,9 @@ class DemographicConfig(BaseModel):
 
     def __str__(self):
         return self.field_name
+
+    class Meta:
+        db_table = 'demographic_configs'
 
 class SchoolCalendar(BaseModel):
     EVENT_TYPE_CHOICES = (
@@ -318,6 +380,11 @@ class SchoolCalendar(BaseModel):
 
     def __str__(self):
         return self.event_name
+    
+    class Meta:
+        ordering = ['start_date']
+        db_table = 'school_calendars'
+
 
 class Enrollment(BaseModel):
     """
@@ -348,6 +415,14 @@ class Enrollment(BaseModel):
         on_delete=models.CASCADE,
         related_name='enrollments'
     )
+    intake = models.ForeignKey(
+        Intake,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='student_enrollments',
+        help_text='Intake cohort the student belongs to'
+    )
     academic_year = models.ForeignKey(
         AcademicYear,
         on_delete=models.PROTECT,
@@ -363,6 +438,14 @@ class Enrollment(BaseModel):
         on_delete=models.PROTECT,
         related_name='enrollments'
     )
+    curriculum_level = models.ForeignKey(
+        CurriculumLevel,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='enrollments',
+        help_text='Level within curriculum (e.g. Primary, JSS, Senior Secondary)'
+    )
     grade = models.ForeignKey(
         GradeStructure,
         on_delete=models.PROTECT,
@@ -376,6 +459,14 @@ class Enrollment(BaseModel):
         blank=True,
         related_name='enrollments',
         help_text='Section/Stream within the class'
+    )
+    campus = models.ForeignKey(
+        'workforce.Campus',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='campus_enrollments',
+        help_text='Campus for this enrollment'
     )
     
     # Status and Type
@@ -457,6 +548,7 @@ class Enrollment(BaseModel):
                 name='unique_active_enrollment_per_term'
             )
         ]
+        
     
     def __str__(self):
         return f"{self.student} - {self.grade.name} ({self.academic_year.name} {self.term.name})"
@@ -529,3 +621,18 @@ class Enrollment(BaseModel):
             current = current.previous_enrollment
         
         return history
+    class Meta:
+        ordering = ['-enrollment_date', '-created_at']
+        indexes = [
+            models.Index(fields=['student', 'academic_year', 'term']),
+            models.Index(fields=['status', 'is_active']),
+            models.Index(fields=['enrollment_date']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['student', 'academic_year', 'term'],
+                condition=models.Q(is_active=True, is_deleted=False),
+                name='unique_active_enrollment_per_term'
+            )
+        ]
+        db_table = 'student_enrollments'

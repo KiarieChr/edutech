@@ -12,6 +12,7 @@ class AccountSerializer(serializers.ModelSerializer):
             'id', 'code', 'name', 'type', 'type_display', 
             'sub_type', 'sub_type_display', 'description', 
             'parent', 'is_active', 'is_student_related',
+            'available_in_payroll',
             'created_at', 'updated_at', 'normal_balance'
         ]
         read_only_fields = ['created_at', 'updated_at']

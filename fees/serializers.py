@@ -5,6 +5,7 @@ from finance.models import Account
 
 class FeeItemSerializer(serializers.ModelSerializer):
     account_name = serializers.ReadOnlyField(source='account.name')
+    is_mandatory = serializers.ReadOnlyField()  # Computed property: not is_optional
     
     class Meta:
         model = FeeItem
@@ -33,7 +34,7 @@ class FeeStructureSerializer(serializers.ModelSerializer):
             'term', 'term_details',
             'grade', 'grade_details',
             'curriculum', 
-            'currency', 'status', 'is_active',
+            'currency', 'status',
             'created_at', 'updated_at',
             'items', 'total_amount',
             'clone_from_id'
@@ -111,3 +112,201 @@ class FeeInvoiceSerializer(serializers.ModelSerializer):
             'total_amount', 'paid_amount', 'balance',
             'items'
         ]
+
+
+# ============================================================
+# FEE TEMPLATE SERIALIZERS
+# ============================================================
+
+from .models import VoteHead, GradeBand, FeeTemplate, TemplateLineItem, StudentFeeProfile
+
+
+class VoteHeadSerializer(serializers.ModelSerializer):
+    account_name = serializers.CharField(source='default_account.name', read_only=True)
+    account_code = serializers.CharField(source='default_account.code', read_only=True)
+    usage_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VoteHead
+        fields = [
+            'id', 'name', 'code', 'default_account', 'account_name', 'account_code',
+            'frequency', 'is_optional', 'description', 'is_active',
+            'usage_count', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_usage_count(self, obj):
+        return obj.template_lines.count()
+
+    def validate_default_account(self, value):
+        if not value.is_student_related:
+            raise serializers.ValidationError("Account must be flagged as Student Related.")
+        if value.type not in ['INCOME', 'LIABILITY']:
+            raise serializers.ValidationError("Account must be Income or Liability.")
+        return value
+
+
+class GradeBandSerializer(serializers.ModelSerializer):
+    grade_names = serializers.ReadOnlyField()
+    grade_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GradeBand
+        fields = [
+            'id', 'name', 'grades', 'grade_names', 'grade_count',
+            'description', 'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_grade_count(self, obj):
+        return obj.grades.count()
+
+
+class TemplateLineItemSerializer(serializers.ModelSerializer):
+    vote_head_name = serializers.CharField(source='vote_head.name', read_only=True)
+    vote_head_code = serializers.CharField(source='vote_head.code', read_only=True)
+    effective_account_name = serializers.SerializerMethodField()
+    effective_account_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TemplateLineItem
+        fields = [
+            'id', 'template', 'vote_head', 'vote_head_name', 'vote_head_code',
+            'amount', 'override_account', 'effective_account_name', 'effective_account_id',
+            'is_mandatory', 'is_optional', 'applies_to', 'priority'
+        ]
+        read_only_fields = ['is_optional']
+
+    def get_effective_account_name(self, obj):
+        acc = obj.effective_account
+        return f"{acc.code} - {acc.name}" if acc else None
+
+    def get_effective_account_id(self, obj):
+        acc = obj.effective_account
+        return acc.id if acc else None
+
+
+class TemplateLineItemWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TemplateLineItem
+        fields = ['id', 'template', 'vote_head', 'amount', 'override_account', 'is_mandatory', 'applies_to', 'priority']
+
+
+class FeeTemplateSerializer(serializers.ModelSerializer):
+    line_items = TemplateLineItemSerializer(many=True, read_only=True)
+    term_name = serializers.CharField(source='term.name', read_only=True)
+    year_name = serializers.CharField(source='academic_year.name', read_only=True)
+    grade_band_name = serializers.CharField(source='grade_band.name', read_only=True, default=None)
+    covered_grades = serializers.SerializerMethodField()
+    student_count = serializers.SerializerMethodField()
+    total_amount = serializers.ReadOnlyField()
+    mandatory_total = serializers.ReadOnlyField()
+
+    class Meta:
+        model = FeeTemplate
+        fields = [
+            'id', 'name',
+            'grade_band', 'grade_band_name', 'grades', 'covered_grades',
+            'curriculum', 'term', 'term_name', 'academic_year', 'year_name',
+            'status', 'currency',
+            'parent_template',
+            'line_items', 'total_amount', 'mandatory_total',
+            'student_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'total_amount', 'mandatory_total']
+
+    def get_covered_grades(self, obj):
+        grades = obj.get_covered_grades()
+        return [{'id': g.id, 'name': g.name} for g in grades]
+
+    def get_student_count(self, obj):
+        """Count enrolled students across all covered grades for this term/year."""
+        from academics.models import StudentSessionEnrollment, ClassSession
+        grade_ids = [g.id for g in obj.get_covered_grades()]
+        sessions = ClassSession.objects.filter(
+            grade_id__in=grade_ids,
+            term=obj.term,
+            academic_year=obj.academic_year
+        )
+        return StudentSessionEnrollment.objects.filter(
+            session__in=sessions,
+            is_active=True
+        ).values('student_id').distinct().count()
+
+
+class NestedLineItemSerializer(serializers.Serializer):
+    """Nested serializer for line items within FeeTemplate create/update."""
+    id = serializers.IntegerField(required=False)
+    vote_head = serializers.PrimaryKeyRelatedField(queryset=VoteHead.objects.all())
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    is_mandatory = serializers.BooleanField(default=True)
+    applies_to = serializers.ChoiceField(
+        choices=TemplateLineItem.APPLIES_TO_CHOICES, default='ALL'
+    )
+    override_account = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.filter(is_student_related=True),
+        required=False, allow_null=True
+    )
+    priority = serializers.IntegerField(default=0)
+
+
+class FeeTemplateWriteSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating FeeTemplate with nested line items."""
+    line_items = NestedLineItemSerializer(many=True, required=False)
+
+    class Meta:
+        model = FeeTemplate
+        fields = [
+            'id', 'name', 'grade_band', 'grades', 'curriculum',
+            'term', 'academic_year', 'status', 'currency', 'parent_template',
+            'line_items',
+        ]
+
+    def create(self, validated_data):
+        line_items_data = validated_data.pop('line_items', [])
+        grades_data = validated_data.pop('grades', [])
+        template = FeeTemplate.objects.create(**validated_data)
+        if grades_data:
+            template.grades.set(grades_data)
+        for li_data in line_items_data:
+            li_data.pop('id', None)
+            TemplateLineItem.objects.create(template=template, **li_data)
+        return template
+
+    def update(self, instance, validated_data):
+        line_items_data = validated_data.pop('line_items', None)
+        grades_data = validated_data.pop('grades', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if grades_data is not None:
+            instance.grades.set(grades_data)
+        if line_items_data is not None:
+            # Replace all line items
+            instance.line_items.all().delete()
+            for li_data in line_items_data:
+                li_data.pop('id', None)
+                TemplateLineItem.objects.create(template=instance, **li_data)
+        return instance
+
+
+class StudentFeeProfileSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    custom_item_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentFeeProfile
+        fields = [
+            'id', 'student', 'student_name',
+            'is_boarder', 'uses_transport',
+            'custom_items', 'custom_item_names',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def get_student_name(self, obj):
+        return str(obj.student)
+
+    def get_custom_item_names(self, obj):
+        return list(obj.custom_items.values_list('name', flat=True))

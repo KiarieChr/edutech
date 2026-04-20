@@ -207,6 +207,12 @@ class User(AbstractUser):
             except:
                 pass
         super().delete(*args, **kwargs)
+
+    class Meta:
+        db_table = 'auth_user'  # Use the default auth_user table to avoid issues with Django's auth system
+        verbose_name = 'User'
+        verbose_name_plural = 'Users'
+        
 class StudentManager(models.Manager):
     def search(self, query=None):
         qs = self.get_queryset()
@@ -234,8 +240,33 @@ class Student(models.Model):
     # Identity & Demographics
     admission_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
-    nationality = models.CharField(max_length=100, null=True, blank=True)
+    nationality = models.CharField(max_length=100, null=True, blank=True, default='Kenyan')
     religion = models.CharField(max_length=50, null=True, blank=True)
+    
+    # Kenyan Admission Fields
+    birth_certificate_number = models.CharField(max_length=50, null=True, blank=True, help_text='Birth certificate number')
+    home_address = models.TextField(null=True, blank=True, help_text='Physical home address')
+    
+    # Medical Information
+    medical_conditions = models.TextField(null=True, blank=True, help_text='Any known medical conditions')
+    allergies = models.TextField(null=True, blank=True, help_text='Known allergies')
+    special_needs = models.TextField(null=True, blank=True, help_text='Special educational needs or requirements')
+    blood_group = models.CharField(max_length=5, null=True, blank=True, choices=[
+        ('A+', 'A+'), ('A-', 'A-'), ('B+', 'B+'), ('B-', 'B-'),
+        ('AB+', 'AB+'), ('AB-', 'AB-'), ('O+', 'O+'), ('O-', 'O-')
+    ])
+    
+    # Emergency Contact
+    emergency_contact_name = models.CharField(max_length=150, null=True, blank=True)
+    emergency_contact_phone = models.CharField(max_length=20, null=True, blank=True)
+    emergency_contact_relationship = models.CharField(max_length=50, null=True, blank=True)
+    
+    # Previous School Information
+    previous_school_name = models.CharField(max_length=200, null=True, blank=True)
+    previous_school_address = models.TextField(null=True, blank=True)
+    previous_class = models.CharField(max_length=50, null=True, blank=True)
+    transfer_reason = models.TextField(null=True, blank=True)
+    previous_school_leaving_date = models.DateField(null=True, blank=True)
     
     # Intake/Cohort tracking - tracks which cohort the student belongs to
     intake = models.ForeignKey(
@@ -250,6 +281,14 @@ class Student(models.Model):
         null=True,
         blank=True,
         help_text='Date when student was admitted to the school'
+    )
+    campus = models.ForeignKey(
+        'workforce.Campus',
+        on_delete=models.PROTECT,
+        related_name='students',
+        null=True,
+        blank=True,
+        help_text='Primary campus this student belongs to'
     )
     status = models.CharField(
         max_length=20,
@@ -327,7 +366,7 @@ class Parent(models.Model):
     """
 
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    student = models.OneToOneField(Student, null=True, on_delete=models.SET_NULL)
+    student = models.ForeignKey(Student, null=True, on_delete=models.SET_NULL, related_name='parents')
     first_name = models.CharField(max_length=120)
     last_name = models.CharField(max_length=120)
     phone = models.CharField(max_length=60, blank=True, null=True)
@@ -468,4 +507,68 @@ class Activity(models.Model):
             ip = request.META.get('REMOTE_ADDR')
         return ip
 
+
+# ─── Per-session authentication tokens ───────────────────────────────────────
+
+import binascii
+import os as _os
+
+
+class UserToken(models.Model):
+    """
+    One token per login session.  Unlike DRF's built-in Token (which is one-per-user),
+    each login creates a fresh UserToken so that individual sessions can be listed
+    and revoked independently.
+    """
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='user_tokens',
+    )
+    key = models.CharField(max_length=40, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(auto_now_add=True)
+
+    # Device fingerprint captured at login time
+    device = models.CharField(max_length=120, blank=True)
+    browser = models.CharField(max_length=120, blank=True)
+    os = models.CharField(max_length=120, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+
+    # Optional label the user can set, e.g. "My Work PC"
+    label = models.CharField(max_length=80, blank=True)
+
+    class Meta:
+        ordering = ['-last_used']
+
+    def __str__(self):
+        return f"{self.user.username} — {self.device or 'Unknown'} ({self.key[:8]}…)"
+
+    @classmethod
+    def generate_key(cls):
+        return binascii.hexlify(_os.urandom(20)).decode()
+
+    @classmethod
+    def create_for_user(cls, user, request=None):
+        """Create a new session token, optionally parsing device info from request."""
+        import user_agents as ua_lib
+
+        device = browser = os_name = ip = ua_str = ''
+        if request:
+            ip = Activity.get_client_ip(request)
+            ua_str = request.META.get('HTTP_USER_AGENT', '')
+            if ua_str:
+                ua = ua_lib.parse(ua_str)
+                device = ua.device.family or 'Unknown Device'
+                browser = f"{ua.browser.family} {ua.browser.version_string}".strip()
+                os_name = f"{ua.os.family} {ua.os.version_string}".strip()
+
+        return cls.objects.create(
+            user=user,
+            key=cls.generate_key(),
+            device=device,
+            browser=browser,
+            os=os_name,
+            ip_address=ip or None,
+            user_agent=ua_str,
+        )
 

@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django.db import transaction
 from django.conf import settings
 from django.utils import timezone
-from datetime import datetime
+from datetime import datetime, date as _date
 
 # Models
 from accounts.models import User, Student, Parent
@@ -15,7 +15,7 @@ from student_settings.models import (
     AcademicYear, Term
 )
 from student_management.models.admission import Admission
-from student_management.models.class_session import StudentPlacement
+from student_settings.models import Enrollment
 from student_management.models.application import Application
 
 class ExcelImportUtils:
@@ -134,13 +134,20 @@ class ExcelImportUtils:
             'curriculums': {c.code: c for c in Curriculum.objects.all()},
             'levels': {l.name: l for l in CurriculumLevel.objects.all()},
             'grades': {g.name: g for g in GradeStructure.objects.all()},
-            'streams': {s.name: s for s in Stream.objects.all()}, # Note: Streams name might not be unique globally! Usually linked to grade.
-            # Warning: Stream name "A" might exist for Grade 1 and Grade 2. 
-            # We need smarter lookup for Stream.
+            'streams': {s.name: s for s in Stream.objects.all()},
+            'streams_by_grade': {
+                (s.name, s.grade_id): s
+                for s in Stream.objects.select_related('grade').all()
+            },
             'intakes': {i.name: i for i in Intake.objects.all()},
             'years': {str(y.name): y for y in AcademicYear.objects.all()}, # Cast to string just in case Excel sends int
-            'terms': {t.name: t for t in Term.objects.all()},
+            'terms': {},  # keyed by (term_name, year_name) — populated below
         }
+        # Build term cache keyed by (term_name, year_name) to avoid cross-year collisions
+        for t in Term.objects.select_related('academic_year').all():
+            cache['terms'][(t.name, str(t.academic_year.name))] = t
+        # Also keep a flat name→term map as fallback for rows missing year
+        cache['terms_by_name'] = {t.name: t for t in Term.objects.all()}
         
         existing_adm_nos = set(Student.objects.values_list('admission_number', flat=True))
 
@@ -216,15 +223,10 @@ class ExcelImportUtils:
             # Stream logic: Try to find stream by name AND grade if possible
             # Simplified: Just check if stream name exists, we might need a better UI for stream selection or validation
             if stream_name:
-                # We need to filter streams by the identified grade
-                # We can't use the simple cache for this.
-                # Just query? Or optimize later.
-                # For bulk import, optimizing is better.
-                # Let's use simple logic: if grade is valid, check if stream exists for that grade
                 if 'grade' in row_data:
-                    stream = Stream.objects.filter(name=stream_name, grade=row_data['grade']).first()
-                    if stream:
-                        row_data['stream'] = stream
+                    stream_key = (stream_name, row_data['grade'].pk)
+                    if stream_key in cache['streams_by_grade']:
+                        row_data['stream'] = cache['streams_by_grade'][stream_key]
                     else:
                         row_errors.append(f"Stream '{stream_name}' not found in {grade_name}")
             else:
@@ -240,8 +242,12 @@ class ExcelImportUtils:
             else:
                 row_errors.append(f"Academic Year '{year_name}' not found")
 
-            if term_name in cache['terms']:
-                row_data['term'] = cache['terms'][term_name]
+            # Look up term scoped to the academic year to avoid cross-year mismatch
+            term_key = (term_name, year_name)
+            if term_key in cache['terms']:
+                row_data['term'] = cache['terms'][term_key]
+            elif term_name in cache['terms_by_name']:
+                row_data['term'] = cache['terms_by_name'][term_name]
             else:
                 row_errors.append(f"Term '{term_name}' not found")
             
@@ -291,44 +297,73 @@ class ExcelImportUtils:
 
     @classmethod
     @transaction.atomic
-    def process_import(cls, valid_data_list):
-        created_count = 0
+    def process_import(cls, valid_data_list, user=None):
+        """
+        Bulk-import students using bulk_create for performance.
+        With 900 rows this reduces ~5400 DB queries to ~7 batch inserts.
+        """
+        if not valid_data_list:
+            return 0
+
+        importing_user = user
+        now_date = timezone.now().date()
+
+        # ── 1. Pre-generate unique usernames in memory ───────────
+        existing_usernames = set(
+            User.objects.values_list('username', flat=True)
+        )
+        usernames = []
         for data in valid_data_list:
-            # 1. Create User
-            username = data['first_name'].lower() + "." + data['last_name'].lower()
-            # Uniqueness handled by signal? No, we suppressed it.
-            # Handle uniqueness manually
+            base = f"{data['first_name'].lower()}.{data['last_name'].lower()}"
+            username = base
             counter = 1
-            base = username
-            while User.objects.filter(username=username).exists():
+            while username in existing_usernames:
                 username = f"{base}{counter}"
                 counter += 1
-            
-            password = data['adm_no']
-            
-            user = User(
-                username=username,
+            existing_usernames.add(username)
+            usernames.append(username)
+
+        # ── 2. Build & bulk-create User objects ──────────────────
+        #   Students get their admission_number as initial password
+        #   and should change it on first login.
+        from django.contrib.auth.hashers import make_password
+        # Pre-hash passwords with a dedup cache to avoid redundant bcrypt calls
+        pw_cache = {}
+        for data in valid_data_list:
+            pwd = data['adm_no']
+            if pwd not in pw_cache:
+                pw_cache[pwd] = make_password(pwd)
+        user_objs = []
+        for i, data in enumerate(valid_data_list):
+            u = User(
+                username=usernames[i],
                 email=data.get('guardian_email', ''),
                 first_name=data['first_name'],
                 last_name=data['last_name'],
                 is_student=True,
-                gender=data['gender']
+                gender=data['gender'],
+                password=pw_cache[data['adm_no']],
+                is_first_login=True,
             )
-            user.set_password(password)
-            user._skip_account_creation_signal = True
-            user.save()
-            
-            # 2. Create Student
-            student = Student.objects.create(
-                student=user,
+            user_objs.append(u)
+        created_users = User.objects.bulk_create(user_objs)
+
+        # ── 3. Bulk-create Students ──────────────────────────────
+        student_objs = [
+            Student(
+                student=created_users[i],
                 admission_number=data['adm_no'],
                 date_of_birth=data.get('dob_obj'),
                 intake=data['intake'],
-                admission_date=data.get('adm_date_obj')
+                admission_date=data.get('adm_date_obj'),
             )
-            
-            # 3. Create Application (Required for Admission)
-            application = Application.objects.create(
+            for i, data in enumerate(valid_data_list)
+        ]
+        created_students = Student.objects.bulk_create(student_objs)
+
+        # ── 4. Bulk-create Applications ──────────────────────────
+        app_objs = [
+            Application(
                 first_name=data['first_name'],
                 last_name=data['last_name'],
                 date_of_birth=data.get('dob_obj'),
@@ -340,58 +375,273 @@ class ExcelImportUtils:
                 guardian_name=data.get('guardian_name'),
                 email=data.get('guardian_email'),
                 phone_number=data.get('guardian_phone'),
-                application_status='accepted' # Auto-accept
+                application_status='accepted',
             )
+            for data in valid_data_list
+        ]
+        created_apps = Application.objects.bulk_create(app_objs)
 
-            # 4. Create Admission Record (Historical)
-            Admission.objects.create(
-                application=application, # Link the application
-                student=student,
+        # ── 5. Bulk-create Admissions ────────────────────────────
+        Admission.objects.bulk_create([
+            Admission(
+                application=created_apps[i],
+                student=created_students[i],
                 admission_number=data['adm_no'],
-                admission_date=data.get('adm_date_obj') or timezone.now().date(),
-                # Application link is missing for bulk import, which is fine (direct entry)
+                admission_date=data.get('adm_date_obj') or now_date,
             )
-            
-            # 5. Create Student Placement
-            StudentPlacement.objects.create(
-                student=student,
-                intake=data['intake'],
+            for i, data in enumerate(valid_data_list)
+        ])
+
+        # ── 6. Bulk-create Enrollments (skips full_clean — data already validated) ──
+        Enrollment.objects.bulk_create([
+            Enrollment(
+                student=created_students[i],
+                intake=data.get('intake'),
                 academic_year=data['year'],
                 term=data['term'],
                 curriculum=data['curriculum'],
-                curriculum_level=data.get('level'), # Might be None, but model allows it now
+                curriculum_level=data.get('level'),
                 grade=data['grade'],
                 stream=data.get('stream'),
-                session_type='admission',
-                session_status='active',
-                start_date=data.get('adm_date_obj') or timezone.now().date()
+                enrollment_type='new_admission',
+                status='active',
+                is_active=True,
+                enrollment_date=data.get('adm_date_obj') or now_date,
+                created_by=importing_user,
+                updated_by=importing_user,
             )
-            
-            # 6. Create Parent/Guardian (Optional)
-            if data['guardian_name']:
-                 # Simplified parent creation logic similar to previous step
-                 # Username P{ADM}
-                 p_username = f"P{data['adm_no']}"
-                 p_user = User(
-                     username=p_username,
-                     email=data.get('guardian_email', ''),
-                     first_name=data['guardian_name'].split()[0],
-                     last_name=" ".join(data['guardian_name'].split()[1:]),
-                     is_parent=True
-                 )
-                 p_user.set_password(p_username)
-                 p_user._skip_account_creation_signal = True
-                 p_user.save()
-                 
-                 Parent.objects.create(
-                     user=p_user,
-                     student=student,
-                     first_name=p_user.first_name,
-                     last_name=p_user.last_name,
-                     phone=data.get('guardian_phone', ''),
-                     email=data.get('guardian_email', '')
-                 )
+            for i, data in enumerate(valid_data_list)
+        ])
 
-            created_count += 1
-            
-        return created_count
+        # ── 7. Bulk-create Parents / Guardians ───────────────────
+        guardian_rows = [
+            (i, data) for i, data in enumerate(valid_data_list)
+            if data.get('guardian_name')
+        ]
+        if guardian_rows:
+            p_user_objs = []
+            for i, data in guardian_rows:
+                p_username = f"P{data['adm_no']}"
+                counter = 1
+                base_p = p_username
+                while p_username in existing_usernames:
+                    p_username = f"{base_p}_{counter}"
+                    counter += 1
+                existing_usernames.add(p_username)
+
+                parts = data['guardian_name'].split()
+                pu = User(
+                    username=p_username,
+                    email=data.get('guardian_email', ''),
+                    first_name=parts[0],
+                    last_name=' '.join(parts[1:]) if len(parts) > 1 else '',
+                    is_parent=True,
+                    password=make_password(p_username),
+                    is_first_login=True,
+                )
+                p_user_objs.append(pu)
+
+            created_p_users = User.objects.bulk_create(p_user_objs)
+
+            Parent.objects.bulk_create([
+                Parent(
+                    user=created_p_users[idx],
+                    student=created_students[i],
+                    first_name=created_p_users[idx].first_name,
+                    last_name=created_p_users[idx].last_name,
+                    phone=data.get('guardian_phone', ''),
+                    email=data.get('guardian_email', ''),
+                )
+                for idx, (i, data) in enumerate(guardian_rows)
+            ])
+
+        return len(valid_data_list)
+
+    # ── Chunked import helpers ───────────────────────────────────
+
+    @staticmethod
+    def _serialize_valid_rows(valid_rows):
+        """Convert validated rows (with ORM objects) to JSON-safe dicts for caching."""
+        serialized = []
+        for data in valid_rows:
+            row = {
+                'first_name': data['first_name'],
+                'last_name': data['last_name'],
+                'gender': data['gender'],
+                'adm_no': data['adm_no'],
+                'dob_obj': data.get('dob_obj').isoformat() if data.get('dob_obj') else None,
+                'adm_date_obj': data.get('adm_date_obj').isoformat() if data.get('adm_date_obj') else None,
+                'guardian_name': data.get('guardian_name', ''),
+                'guardian_phone': data.get('guardian_phone', ''),
+                'guardian_email': data.get('guardian_email', ''),
+                'curriculum_id': data['curriculum'].pk,
+                'level_id': data.get('level').pk if data.get('level') else None,
+                'grade_id': data['grade'].pk,
+                'stream_id': data.get('stream').pk if data.get('stream') else None,
+                'intake_id': data['intake'].pk,
+                'year_id': data['year'].pk,
+                'term_id': data['term'].pk,
+            }
+            serialized.append(row)
+        return serialized
+
+    @classmethod
+    @transaction.atomic
+    def process_chunk(cls, chunk_data, importing_user=None):
+        """
+        Process a single chunk of serialized (ID-based) rows.
+        Each chunk is its own atomic transaction — previous chunks survive if this fails.
+        """
+        if not chunk_data:
+            return 0
+
+        now_date = timezone.now().date()
+        _to_date = lambda s: _date.fromisoformat(s) if s else None
+
+        # ── 1. Generate unique usernames ─────────────────────────
+        existing_usernames = set(
+            User.objects.values_list('username', flat=True)
+        )
+        usernames = []
+        for data in chunk_data:
+            base = f"{data['first_name'].lower()}.{data['last_name'].lower()}"
+            username = base
+            counter = 1
+            while username in existing_usernames:
+                username = f"{base}{counter}"
+                counter += 1
+            existing_usernames.add(username)
+            usernames.append(username)
+
+        # ── 2. Hash passwords (dedup cache) ──────────────────────
+        from django.contrib.auth.hashers import make_password
+        pw_cache = {}
+        for data in chunk_data:
+            pwd = data['adm_no']
+            if pwd not in pw_cache:
+                pw_cache[pwd] = make_password(pwd)
+
+        # ── 3. Create User objects ───────────────────────────────
+        user_objs = [
+            User(
+                username=usernames[i],
+                email=data.get('guardian_email', ''),
+                first_name=data['first_name'],
+                last_name=data['last_name'],
+                is_student=True,
+                gender=data['gender'],
+                password=pw_cache[data['adm_no']],
+                is_first_login=True,
+            )
+            for i, data in enumerate(chunk_data)
+        ]
+        created_users = User.objects.bulk_create(user_objs)
+
+        # ── 4. Create Students ───────────────────────────────────
+        student_objs = [
+            Student(
+                student=created_users[i],
+                admission_number=data['adm_no'],
+                date_of_birth=_to_date(data.get('dob_obj')),
+                intake_id=data['intake_id'],
+                admission_date=_to_date(data.get('adm_date_obj')),
+            )
+            for i, data in enumerate(chunk_data)
+        ]
+        created_students = Student.objects.bulk_create(student_objs)
+
+        # ── 5. Create Applications ───────────────────────────────
+        app_objs = [
+            Application(
+                first_name=data['first_name'],
+                last_name=data['last_name'],
+                date_of_birth=_to_date(data.get('dob_obj')),
+                gender=data['gender'],
+                intake_id=data['intake_id'],
+                applying_for_curriculum_id=data['curriculum_id'],
+                applying_for_level_id=data.get('level_id'),
+                applying_for_grade_id=data['grade_id'],
+                guardian_name=data.get('guardian_name'),
+                email=data.get('guardian_email'),
+                phone_number=data.get('guardian_phone'),
+                application_status='accepted',
+            )
+            for data in chunk_data
+        ]
+        created_apps = Application.objects.bulk_create(app_objs)
+
+        # ── 6. Create Admissions ─────────────────────────────────
+        Admission.objects.bulk_create([
+            Admission(
+                application=created_apps[i],
+                student=created_students[i],
+                admission_number=data['adm_no'],
+                admission_date=_to_date(data.get('adm_date_obj')) or now_date,
+            )
+            for i, data in enumerate(chunk_data)
+        ])
+
+        # ── 7. Create Enrollments ────────────────────────────────
+        Enrollment.objects.bulk_create([
+            Enrollment(
+                student=created_students[i],
+                intake_id=data.get('intake_id'),
+                academic_year_id=data['year_id'],
+                term_id=data['term_id'],
+                curriculum_id=data['curriculum_id'],
+                curriculum_level_id=data.get('level_id'),
+                grade_id=data['grade_id'],
+                stream_id=data.get('stream_id'),
+                enrollment_type='new_admission',
+                status='active',
+                is_active=True,
+                enrollment_date=_to_date(data.get('adm_date_obj')) or now_date,
+                created_by=importing_user,
+                updated_by=importing_user,
+            )
+            for i, data in enumerate(chunk_data)
+        ])
+
+        # ── 8. Create Parents ────────────────────────────────────
+        guardian_rows = [
+            (i, data) for i, data in enumerate(chunk_data)
+            if data.get('guardian_name')
+        ]
+        if guardian_rows:
+            p_user_objs = []
+            for i, data in guardian_rows:
+                p_username = f"P{data['adm_no']}"
+                counter = 1
+                base_p = p_username
+                while p_username in existing_usernames:
+                    p_username = f"{base_p}_{counter}"
+                    counter += 1
+                existing_usernames.add(p_username)
+
+                parts = data['guardian_name'].split()
+                pu = User(
+                    username=p_username,
+                    email=data.get('guardian_email', ''),
+                    first_name=parts[0],
+                    last_name=' '.join(parts[1:]) if len(parts) > 1 else '',
+                    is_parent=True,
+                    password=make_password(p_username),
+                    is_first_login=True,
+                )
+                p_user_objs.append(pu)
+
+            created_p_users = User.objects.bulk_create(p_user_objs)
+
+            Parent.objects.bulk_create([
+                Parent(
+                    user=created_p_users[idx],
+                    student=created_students[i],
+                    first_name=created_p_users[idx].first_name,
+                    last_name=created_p_users[idx].last_name,
+                    phone=data.get('guardian_phone', ''),
+                    email=data.get('guardian_email', ''),
+                )
+                for idx, (i, data) in enumerate(guardian_rows)
+            ])
+
+        return len(chunk_data)

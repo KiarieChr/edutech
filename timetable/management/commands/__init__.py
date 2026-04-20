@@ -1,0 +1,1 @@
+# timetable management commands package

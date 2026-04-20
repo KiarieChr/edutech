@@ -197,7 +197,7 @@ class EmailLoginSerializer(serializers.Serializer):
 
 
 class FirstTimeSetupSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
     username = serializers.CharField(required=False)
     password = serializers.CharField(style={'input_type': 'password'}, required=True)
     confirm_password = serializers.CharField(style={'input_type': 'password'}, required=True)
@@ -205,7 +205,7 @@ class FirstTimeSetupSerializer(serializers.Serializer):
     last_name = serializers.CharField(required=False)
     phone = serializers.CharField(required=False, allow_blank=True)
     address = serializers.CharField(required=False, allow_blank=True)
-    gender = serializers.ChoiceField(choices=[('M', 'Male'), ('F', 'Female')], required=False)
+    gender = serializers.ChoiceField(choices=[('M', 'Male'), ('F', 'Female')], required=False, allow_blank=True)
     
     def validate(self, data):
         user = self.context.get('user')
@@ -221,12 +221,13 @@ class FirstTimeSetupSerializer(serializers.Serializer):
         except ValidationError as e:
             raise serializers.ValidationError({'password': list(e.messages)})
         
-        # Email validation
-        email = data['email']
-        if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
-            raise serializers.ValidationError({
-                'email': _("This email is already registered.")
-            })
+        # Email validation - only check uniqueness if email provided
+        email = data.get('email', '').strip()
+        if email:
+            if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+                raise serializers.ValidationError({
+                    'email': _("This email is already registered. Leave blank to auto-generate one.")
+                })
         
         # Username validation (if provided)
         username = data.get('username')
@@ -247,6 +248,12 @@ class UserSerializer(serializers.ModelSerializer):
     picture_url = serializers.CharField(source='get_picture', read_only=True)
     profile_url = serializers.CharField(source='get_absolute_url', read_only=True)
     role = serializers.CharField(source='get_user_role', read_only=True)
+    groups = GroupSerializer(many=True, read_only=True)
+    group_ids = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Group.objects.all(),
+        source='groups', write_only=True, required=False
+    )
+    permissions = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = User
@@ -254,9 +261,13 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'email', 'username', 'first_name', 'last_name', 'full_name',
             'is_student', 'is_lecturer', 'is_parent', 'is_dep_head', 'is_superuser',
             'is_active', 'gender', 'phone', 'address', 'picture', 'picture_url',
-            'is_first_login', 'date_joined', 'last_login', 'profile_url', 'role'
+            'is_first_login', 'date_joined', 'last_login', 'profile_url', 'role',
+            'groups', 'group_ids', 'permissions'
         ]
         read_only_fields = ['date_joined', 'last_login', 'is_superuser']
+
+    def get_permissions(self, obj):
+        return list(obj.get_all_permissions())
 
 
 class UserDetailSerializer(UserSerializer):
@@ -273,13 +284,14 @@ class UserDetailSerializer(UserSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     confirm_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    employee_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     
     class Meta:
         model = User
         fields = [
             'email', 'username', 'first_name', 'last_name', 'password',
             'confirm_password', 'is_student', 'is_lecturer', 'is_parent',
-            'gender', 'phone', 'address'
+            'gender', 'phone', 'address', 'employee_id'
         ]
         extra_kwargs = {
             'email': {'required': True},
@@ -315,6 +327,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return data
     
     def create(self, validated_data):
+        # Pop employee_id before creating user
+        employee_id = validated_data.pop('employee_id', None)
+        
         # Determine user type
         is_student = validated_data.get('is_student', False)
         is_lecturer = validated_data.get('is_lecturer', False)
@@ -335,6 +350,17 @@ class UserCreateSerializer(serializers.ModelSerializer):
             address=validated_data.get('address'),
             is_first_login=True
         )
+        
+        # Link to employee if provided
+        if employee_id:
+            try:
+                from workforce.core_models import Employee
+                employee = Employee.objects.get(id=employee_id, user__isnull=True)
+                employee.user = user
+                employee.save(update_fields=['user'])
+            except Employee.DoesNotExist:
+                pass  # Employee not found or already linked — skip silently
+        
         return user
 
 
@@ -419,6 +445,10 @@ class StudentSerializer(serializers.ModelSerializer):
     current_term_name = serializers.CharField(source='current_term.name', read_only=True, allow_null=True)
     current_enrollment_id = serializers.IntegerField(source='current_enrollment.id', read_only=True, allow_null=True)
     
+    # Campus
+    campus_id = serializers.IntegerField(source='campus.id', read_only=True, allow_null=True)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, allow_null=True)
+    
     # Program information
     program_name = serializers.CharField(source='program.title', read_only=True, allow_null=True)
     
@@ -435,7 +465,9 @@ class StudentSerializer(serializers.ModelSerializer):
             'current_enrollment_id', 'current_grade_id', 'current_grade_name',
             'current_stream_id', 'current_stream_name',
             'current_academic_year_id', 'current_academic_year_name',
-            'current_term_id', 'current_term_name'
+            'current_term_id', 'current_term_name',
+            # Campus
+            'campus', 'campus_id', 'campus_name'
         ]
         read_only_fields = ['id']
 

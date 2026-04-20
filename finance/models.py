@@ -69,6 +69,7 @@ class Account(models.Model):
     
     is_active = models.BooleanField(default=True)
     is_student_related = models.BooleanField(default=False, help_text="Check if this account is used for student transactions (e.g. Fees, Caution Money)")
+    available_in_payroll = models.BooleanField(default=False, help_text="Check if this account should be available for payroll account linkage")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -233,13 +234,57 @@ class FinanceSettings(models.Model):
     receipt_footer_message = models.TextField(blank=True, default="Thank you for your business.")
     receipt_show_balance = models.BooleanField(default=True)
     receipt_show_voteheads = models.BooleanField(default=True, help_text="Breakdown receipts per invoice vote head")
-    
+
+    # Receipt Format & Branding
+    RECEIPT_FORMAT_CHOICES = [
+        ('STANDARD_A4', 'Standard A4 (Full Page)'),
+        ('COMPACT_A4', 'Compact A4 (Half Page)'),
+        ('A5_RECEIPT', 'A5 Receipt'),
+        ('THERMAL_80MM', 'POS Thermal 80mm'),
+        ('THERMAL_58MM', 'POS Thermal 58mm'),
+        ('DUPLICATE_BOOK', 'Duplicate Book Style'),
+    ]
+    RECEIPT_HEADER_STYLE_CHOICES = [
+        ('LOGO_ONLY', 'Logo Only'),
+        ('COAT_ONLY', 'Coat of Arms Only'),
+        ('BOTH_SIDE', 'Logo Left, Coat of Arms Right'),
+        ('COAT_LEFT_LOGO_RIGHT', 'Coat of Arms Left, Logo Right'),
+        ('BOTH_CENTER', 'Both Centered (Stacked)'),
+    ]
+    receipt_format = models.CharField(max_length=20, choices=RECEIPT_FORMAT_CHOICES, default='THERMAL_80MM')
+    receipt_logo = models.ImageField(upload_to='receipt_branding/', blank=True, null=True, help_text='School/Institution logo')
+    receipt_coat_of_arms = models.ImageField(upload_to='receipt_branding/', blank=True, null=True, help_text='Coat of arms or government seal')
+    receipt_header_style = models.CharField(max_length=25, choices=RECEIPT_HEADER_STYLE_CHOICES, default='LOGO_ONLY')
+    receipt_show_qr_code = models.BooleanField(default=True, help_text='Show QR code for verification')
+    receipt_show_student_photo = models.BooleanField(default=False)
+    receipt_color_primary = models.CharField(max_length=7, default='#1a56db', help_text='Primary accent color (hex)')
+    receipt_color_secondary = models.CharField(max_length=7, default='#374151', help_text='Secondary color for headers (hex)')
+    receipt_watermark_enabled = models.BooleanField(default=False, help_text='Light coat of arms watermark on A4 receipts')
+    receipt_copies = models.IntegerField(default=1, choices=[(1, 'Original Only'), (2, 'Original + Duplicate'), (3, 'Original + Duplicate + Office Copy')])
+    receipt_paper_size = models.CharField(max_length=10, default='A4', choices=[('A4', 'A4'), ('LETTER', 'Letter'), ('A5', 'A5')])
+    receipt_signature_enabled = models.BooleanField(default=True, help_text='Show signature line on receipt')
+    receipt_institution_name = models.CharField(max_length=200, blank=True, default='', help_text='Institution name on receipt header')
+    receipt_institution_address = models.CharField(max_length=300, blank=True, default='', help_text='Address line on receipt')
+    receipt_institution_phone = models.CharField(max_length=50, blank=True, default='')
+    receipt_institution_email = models.CharField(max_length=100, blank=True, default='')
+    receipt_institution_motto = models.CharField(max_length=200, blank=True, default='')
+
     voucher_attachments_required = models.BooleanField(default=False)
     imprest_max_amount = models.DecimalField(max_digits=12, decimal_places=2, default=50000.00)
     imprest_surrender_days = models.IntegerField(default=7, help_text="Days to surrender imprest after issuance")
 
     # Auto-Billing Settings
     auto_billing_enabled = models.BooleanField(default=False)
+    billing_mode = models.CharField(
+        max_length=20,
+        default='STRUCTURE',
+        choices=[
+            ('STRUCTURE', 'Per-Grade Fee Structure'),
+            ('TEMPLATE', 'Grade-Band Fee Template'),
+            ('AUTO', 'Auto (Template first, fallback to Structure)'),
+        ],
+        help_text='Which billing pipeline to use when auto-generating invoices',
+    )
     billing_frequency = models.CharField(max_length=20, default='TERMLY', choices=[('YEARLY', 'Yearly'), ('TERMLY', 'Termly'), ('MONTHLY', 'Monthly')])
     default_billing_days = models.IntegerField(default=14, help_text="Default due days for auto-generated invoices")
 
@@ -287,6 +332,17 @@ class FinanceSettings(models.Model):
         related_name='settings_prepayment',
         limit_choices_to={'type': 'LIABILITY'},
         help_text='Account for student prepayments/unallocated credits'
+    )
+    
+    # Sundry/Other Debtors - for non-student receivables (general customer invoices)
+    default_sundry_debtors_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='settings_sundry_debtors',
+        limit_choices_to={'type': 'ASSET'},
+        help_text='Account for sundry/other debtors (non-student receivables)'
     )
     
     created_at = models.DateTimeField(auto_now_add=True)

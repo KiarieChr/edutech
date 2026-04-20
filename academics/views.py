@@ -1,9 +1,25 @@
+from django.db import models
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import ClassSession, StudentSessionEnrollment
 from student_settings.models import AcademicYear, Term, GradeStructure, CurriculumLevel
 from .serializers import ClassSessionSerializer, StudentSessionEnrollmentSerializer
+
+# Maps institution_type → allowed CurriculumLevel names.
+# A secondary school only gets Junior/Senior Secondary (CBC) or Secondary (8-4-4).
+INSTITUTION_LEVEL_MAP = {
+    'lower_primary':    ['Pre-Primary', 'Lower Primary'],
+    'upper_primary':    ['Upper Primary'],
+    'primary':          ['Pre-Primary', 'Lower Primary', 'Upper Primary', 'Primary'],
+    'junior_secondary': ['Junior Secondary'],
+    'senior_secondary': ['Senior Secondary'],
+    'secondary':        ['Junior Secondary', 'Senior Secondary', 'Secondary'],
+    'mixed':            None,   # None = no filtering, all levels
+    'tertiary':         None,
+    'university':       None,
+    'tvet':             None,
+}
 
 class ClassSessionViewSet(viewsets.ModelViewSet):
     queryset = ClassSession.objects.all()
@@ -13,8 +29,30 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'grade__name']
     ordering_fields = ['academic_year__start_date', 'term__start_date', 'grade__level_order']
 
+    def _get_institution_level_names(self):
+        """Return the list of allowed CurriculumLevel names for this institution, or None for all."""
+        try:
+            from core.models import InstitutionProfile
+            inst = InstitutionProfile.objects.first()
+            if inst:
+                return INSTITUTION_LEVEL_MAP.get(inst.institution_type)
+        except Exception:
+            pass
+        return None
+
+    def _filter_grades_by_institution(self, grades_qs):
+        """Filter a GradeStructure queryset to only include grades
+        whose curriculum_level matches the institution type."""
+        allowed = self._get_institution_level_names()
+        if allowed is not None:
+            grades_qs = grades_qs.filter(curriculum_level__name__in=allowed)
+        return grades_qs
+
     def get_queryset(self):
-        qs = super().get_queryset()
+        from django.db.models import Count
+        qs = super().get_queryset().annotate(
+            enrollment_count=Count('student_enrollments', filter=models.Q(student_enrollments__is_active=True))
+        )
        
         
         from django.utils import timezone
@@ -32,6 +70,11 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
             end_date__lt=today
         ).update(status='closed')
         
+        # Custom filter: current academic year only
+        current_year = self.request.query_params.get('current_year')
+        if current_year and current_year.lower() in ('true', '1', 'yes'):
+            qs = qs.filter(academic_year__is_current=True)
+
         # Custom filter: Intake Progression
         intake_id = self.request.query_params.get('intake')
         if intake_id:
@@ -120,6 +163,8 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
                 is_active=True,
                 is_deleted=False
             ).order_by('level_order')
+            # Limit grades to those matching the institution type
+            subsequent_grades = self._filter_grades_by_institution(subsequent_grades)
 
             # 3. Zip them to map Year X -> Grade X
             # We only generate as far as we have BOTH years and grades
@@ -200,6 +245,13 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
             curriculum__is_active=True,
             curriculum__status='active'
         )
+        # Filter grades to only those matching the institution type
+        grades = self._filter_grades_by_institution(grades)
+
+        if not grades.exists():
+            return Response({
+                "error": "No active grades found matching your institution type. Check your Institution Profile settings and ensure grades have curriculum levels assigned.",
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         for term in terms:
             for grade in grades:
@@ -222,10 +274,20 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
                 )
                 created_count += 1
                 
+        # Gather institution context for the response
+        try:
+            from core.models import InstitutionProfile
+            inst = InstitutionProfile.objects.first()
+            inst_type = inst.get_institution_type_display() if inst else 'Unknown'
+        except Exception:
+            inst_type = 'Unknown'
+
         return Response({
             "message": f"Successfully generated {created_count} class sessions for {academic_year.name}",
             "created_count": created_count,
-            "academic_year": academic_year.name
+            "academic_year": academic_year.name,
+            "institution_type": inst_type,
+            "grades_included": list(grades.values_list('name', flat=True)),
         })
 
 class StudentSessionEnrollmentViewSet(viewsets.ModelViewSet):
@@ -246,67 +308,167 @@ class StudentSessionEnrollmentViewSet(viewsets.ModelViewSet):
     def trigger_auto_billing(self, enrollment):
         """
         Attempts to generate an invoice for the student upon enrollment/reporting.
+        Respects FinanceSettings.billing_mode:
+          STRUCTURE  – legacy per-grade FeeStructure pipeline
+          TEMPLATE   – modern grade-band FeeTemplate pipeline
+          AUTO       – try template first, fall back to structure
         """
-        from fees.services import BillingService
-        from fees.models import FeeStructure
+        from finance.models import FinanceSettings
         from django.utils import timezone
-        
-        # 1. Find standard Fee Structure for this session's context
-        # Resolving Grade/Term/Year from session
+
+        settings = FinanceSettings.load()
+        if not settings.auto_billing_enabled:
+            return
+
+        mode = settings.billing_mode  # STRUCTURE | TEMPLATE | AUTO
+
         grade = enrollment.session.grade
         term = enrollment.session.term
         year = enrollment.session.academic_year
-        curriculum = enrollment.session.curriculum
-        
-        structure = FeeStructure.objects.filter(
-            grade=grade,
-            term=term,
-            academic_year=year,
-            curriculum=curriculum,
-            status='ACTIVE'
-        ).first()
 
-        # Fallback: Ignore Curriculum if strict match fails
-        if not structure:
-             structure = FeeStructure.objects.filter(
-                grade=grade,
-                term=term,
-                academic_year=year,
-                status='ACTIVE'
-            ).first()
-            
-        if not structure:
-            print(f"Auto-Billing skipped: No Active Fee Structure found for {year} {term} {grade}.")
-            return
+        invoice = None
 
-        # 2. Collect Mandatory Items
-        items = []
-        for item in structure.items.filter(is_mandatory=True):
-            items.append({
-                'id': item.id,
-                'amount': float(item.amount) # Full amount
-            })
-            
-        if not items:
-            print("Auto-Billing skipped: No mandatory fee items found.")
-            return
+        # ── Template billing ──────────────────────────────────
+        if mode in ('TEMPLATE', 'AUTO'):
+            try:
+                from fees.template_billing_service import TemplateBillingService
+                svc = TemplateBillingService()
+                template = svc.resolve_template(enrollment.student, term, year)
+                if template:
+                    line_items = svc.resolve_line_items(template, enrollment.student)
+                    if line_items:
+                        payload = {
+                            'student_id': enrollment.student.id,
+                            'template_id': template.id,
+                            'items': [
+                                {'vote_head_id': li.vote_head_id, 'amount': float(li.amount)}
+                                for li in line_items
+                            ],
+                            'due_date': (timezone.now() + timezone.timedelta(days=settings.default_billing_days)).date(),
+                            'remarks': 'Auto-generated (template) upon reporting.',
+                            'is_automated': True,
+                        }
+                        invoice = svc.generate_invoice(payload, user=self.request.user)
+                        print(f"Auto-Billing Success (template): Invoice for {enrollment.student}")
+            except Exception as e:
+                print(f"Auto-Billing template error: {e}")
 
-        # 3. Generate Invoice
-        payload = {
-            'student_id': enrollment.student.id,
-            'structure_id': structure.id,
-            'items': items,
-            'due_date': timezone.now().date(), # Default to today
-            'remarks': 'Auto-generated upon reporting.',
-            'is_automated': True
-        }
-        
+        # ── Structure billing (legacy) ────────────────────────
+        if invoice is None and mode in ('STRUCTURE', 'AUTO'):
+            try:
+                from fees.services import BillingService
+                from fees.models import FeeStructure
+
+                curriculum = enrollment.session.curriculum
+                structure = FeeStructure.objects.filter(
+                    grade=grade, term=term, academic_year=year,
+                    curriculum=curriculum, status='ACTIVE',
+                ).first()
+                if not structure:
+                    structure = FeeStructure.objects.filter(
+                        grade=grade, term=term, academic_year=year,
+                        status='ACTIVE',
+                    ).first()
+
+                if not structure:
+                    print(f"Auto-Billing skipped: No Active Fee Structure for {year} {term} {grade}.")
+                    return
+
+                items = [
+                    {'id': item.id, 'amount': float(item.amount)}
+                    for item in structure.items.filter(is_mandatory=True)
+                ]
+                if not items:
+                    print("Auto-Billing skipped: No mandatory fee items found.")
+                    return
+
+                payload = {
+                    'student_id': enrollment.student.id,
+                    'structure_id': structure.id,
+                    'items': items,
+                    'due_date': (timezone.now() + timezone.timedelta(days=settings.default_billing_days)).date(),
+                    'remarks': 'Auto-generated upon reporting.',
+                    'is_automated': True,
+                }
+                BillingService.generate_invoice(payload, user=self.request.user)
+                print(f"Auto-Billing Success (structure): Invoice for {enrollment.student}")
+            except Exception as e:
+                print(f"Auto-Billing Error: {e}")
+
+    @action(detail=True, methods=['post'])
+    def transfer(self, request, pk=None):
+        """Transfer a student from current session to a new session."""
+        enrollment = self.get_object()
+        new_session_id = request.data.get('new_session')
+        if not new_session_id:
+            return Response({"error": "new_session is required"}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            BillingService.generate_invoice(payload, user=self.request.user)
-            print(f"Auto-Billing Success: Invoice generated for {enrollment.student}")
-        except Exception as e:
-            # Log but don't crash the enrollment?
-            # User wants it to "do the same thing", usually implies success or fail.
-            # But failing enrollment because of billing might be too harsh.
-            # Let's log it.
-            print(f"Auto-Billing Error: {e}")
+            new_session = ClassSession.objects.get(pk=new_session_id)
+        except ClassSession.DoesNotExist:
+            return Response({"error": "Target session not found"}, status=status.HTTP_404_NOT_FOUND)
+        if StudentSessionEnrollment.objects.filter(student=enrollment.student, session=new_session).exists():
+            return Response({"error": "Student is already enrolled in the target session"}, status=status.HTTP_400_BAD_REQUEST)
+        enrollment.status = 'transferred_out'
+        enrollment.is_active = False
+        enrollment.save()
+        new_enrollment = StudentSessionEnrollment.objects.create(
+            student=enrollment.student,
+            session=new_session,
+            intake=enrollment.intake,
+            stream=enrollment.stream,
+            status='active',
+            is_active=True,
+        )
+        self.trigger_auto_billing(new_enrollment)
+        return Response({
+            "message": f"Transferred {enrollment.student} to {new_session.name}",
+            "new_enrollment": StudentSessionEnrollmentSerializer(new_enrollment).data,
+        })
+
+    @action(detail=False, methods=['post'])
+    def bulk_session_enroll(self, request):
+        """Enroll multiple students into a session at once."""
+        session_id = request.data.get('session')
+        student_ids = request.data.get('students', [])
+        intake_id = request.data.get('intake')
+        stream_id = request.data.get('stream')
+        if not session_id or not student_ids or not intake_id:
+            return Response({"error": "session, students, and intake are required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            session = ClassSession.objects.get(pk=session_id)
+        except ClassSession.DoesNotExist:
+            return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
+        from accounts.models import Student
+        from student_settings.models import Intake, Stream
+        try:
+            intake = Intake.objects.get(pk=intake_id)
+        except Intake.DoesNotExist:
+            return Response({"error": "Intake not found"}, status=status.HTTP_404_NOT_FOUND)
+        stream = None
+        if stream_id:
+            try:
+                stream = Stream.objects.get(pk=stream_id)
+            except Stream.DoesNotExist:
+                pass
+        created = 0
+        skipped = 0
+        for sid in student_ids:
+            try:
+                student = Student.objects.get(pk=sid)
+            except Student.DoesNotExist:
+                skipped += 1
+                continue
+            if StudentSessionEnrollment.objects.filter(student=student, session=session).exists():
+                skipped += 1
+                continue
+            enrollment = StudentSessionEnrollment.objects.create(
+                student=student, session=session, intake=intake,
+                stream=stream, status='active', is_active=True,
+            )
+            self.trigger_auto_billing(enrollment)
+            created += 1
+        return Response({
+            "message": f"Enrolled {created} students, skipped {skipped}",
+            "created": created,
+            "skipped": skipped,
+        })

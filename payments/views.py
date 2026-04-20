@@ -3,6 +3,274 @@ import uuid
 import json
 
 from django.shortcuts import render
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework.response import Response
+from rest_framework import status as http_status
+
+from .models import GatewayConfig, PaymentTransaction, SMSLog
+from .services import DarajaService, DarajaError, PaystackService, PaystackError, SMSService, SMSError
+
+
+# ─── Gateway Config management ───────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def list_gateway_configs(request):
+    """List all gateway/SMS configurations (admin only)."""
+    configs = GatewayConfig.objects.all().values(
+        'id', 'provider', 'label', 'environment', 'is_active', 'created_at',
+    )
+    return Response(list(configs))
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def save_gateway_config(request):
+    """Create or update a gateway configuration (admin only)."""
+    data = request.data
+    config_id = data.get('id')
+    provider = data.get('provider', '')
+
+    if config_id:
+        try:
+            cfg = GatewayConfig.objects.get(pk=config_id)
+        except GatewayConfig.DoesNotExist:
+            return Response({'error': 'Config not found'}, status=404)
+    else:
+        cfg = GatewayConfig(provider=provider)
+
+    # Update all provided fields
+    ALLOWED_FIELDS = [
+        'provider', 'label', 'environment', 'is_active',
+        'consumer_key', 'consumer_secret', 'shortcode', 'passkey',
+        'callback_url', 'b2c_initiator_name', 'b2c_initiator_password',
+        'b2c_result_url', 'b2c_queue_timeout_url',
+        'public_key', 'secret_key',
+        'api_key', 'api_secret', 'username', 'sender_id',
+        'account_sid', 'auth_token', 'from_number',
+    ]
+    for field in ALLOWED_FIELDS:
+        if field in data:
+            setattr(cfg, field, data[field])
+
+    cfg.save()
+    return Response({'success': True, 'id': cfg.pk})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAdminUser])
+def delete_gateway_config(request, pk):
+    deleted, _ = GatewayConfig.objects.filter(pk=pk).delete()
+    if deleted:
+        return Response({'success': True})
+    return Response({'error': 'Not found'}, status=404)
+
+
+# ─── Daraja STK Push ─────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def daraja_stk_push(request):
+    """
+    Trigger an M-Pesa STK Push (prompt on customer phone).
+    Body: { phone, amount, account_reference, description, fee_invoice_id? }
+    """
+    data = request.data
+    required = ['phone', 'amount', 'account_reference']
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return Response({'error': f'Missing fields: {", ".join(missing)}'}, status=400)
+
+    try:
+        svc = DarajaService()
+        result = svc.stk_push(
+            phone=data['phone'],
+            amount=int(data['amount']),
+            account_reference=data['account_reference'],
+            description=data.get('description', 'Fee payment'),
+            fee_invoice_id=data.get('fee_invoice_id'),
+            student_id=data.get('student_id'),
+        )
+        return Response(result)
+    except DarajaError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def daraja_stk_query(request):
+    """Query the status of an STK Push. Body: { checkout_request_id }"""
+    checkout_id = request.data.get('checkout_request_id')
+    if not checkout_id:
+        return Response({'error': 'checkout_request_id required'}, status=400)
+    try:
+        svc = DarajaService()
+        return Response(svc.stk_query(checkout_id))
+    except DarajaError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def daraja_callback(request):
+    """
+    Receives M-Pesa payment result from Safaricom.
+    This URL must be publicly accessible (HTTPS) — register it in GatewayConfig.callback_url.
+    """
+    DarajaService.handle_stk_callback(request.data)
+    return Response({'ResultCode': 0, 'ResultDesc': 'Accepted'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def daraja_register_urls(request):
+    """Register C2B validation/confirmation URLs with Safaricom (admin only)."""
+    data = request.data
+    try:
+        svc = DarajaService()
+        result = svc.register_c2b_urls(
+            validation_url=data.get('validation_url', ''),
+            confirmation_url=data.get('confirmation_url', ''),
+        )
+        return Response(result)
+    except DarajaError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+# ─── Paystack ────────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def paystack_initialize(request):
+    """
+    Start a Paystack payment (card / mobile_money / bank etc.).
+    Body: { email, amount, phone?, channel?, callback_url?, fee_invoice_id? }
+    Returns authorization_url to redirect the payer to.
+    """
+    data = request.data
+    if not data.get('email') or not data.get('amount'):
+        return Response({'error': 'email and amount are required'}, status=400)
+    try:
+        svc = PaystackService()
+        result = svc.initialize(
+            email=data['email'],
+            amount_kes=float(data['amount']),
+            phone=data.get('phone', ''),
+            channel=data.get('channel', 'mobile_money'),
+            callback_url=data.get('callback_url', ''),
+            fee_invoice_id=data.get('fee_invoice_id'),
+            student_id=data.get('student_id'),
+            metadata=data.get('metadata'),
+        )
+        return Response(result)
+    except PaystackError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def paystack_verify(request):
+    """Verify a Paystack transaction. Query param: ?reference=<ref>"""
+    ref = request.query_params.get('reference')
+    if not ref:
+        return Response({'error': 'reference required'}, status=400)
+    try:
+        svc = PaystackService()
+        return Response(svc.verify(ref))
+    except PaystackError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def paystack_webhook(request):
+    """Receives Paystack webhook events. Must be registered in your Paystack dashboard."""
+    sig = request.headers.get('X-Paystack-Signature', '')
+    try:
+        svc = PaystackService()
+        svc.handle_webhook(request.data, sig)
+    except PaystackError:
+        pass  # misconfigured — still return 200 so Paystack stops retrying
+    return Response(status=200)
+
+
+# ─── SMS ─────────────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def send_sms(request):
+    """
+    Send a one-off SMS (admin only).
+    Body: { recipient, message, provider? }
+    """
+    data = request.data
+    recipient = data.get('recipient')
+    message = data.get('message')
+    if not recipient or not message:
+        return Response({'error': 'recipient and message are required'}, status=400)
+    try:
+        svc = SMSService(provider_key=data.get('provider'))
+        log = svc.send(recipient, message)
+        return Response({'success': log.status == 'sent', 'log_id': log.pk, 'status': log.status})
+    except SMSError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def send_sms_bulk(request):
+    """
+    Send the same message to multiple recipients.
+    Body: { recipients: [...], message, provider? }
+    """
+    data = request.data
+    recipients = data.get('recipients', [])
+    message = data.get('message', '')
+    if not recipients or not message:
+        return Response({'error': 'recipients and message are required'}, status=400)
+    try:
+        svc = SMSService(provider_key=data.get('provider'))
+        logs = svc.send_bulk(recipients, message)
+        return Response({
+            'sent': sum(1 for l in logs if l.status == 'sent'),
+            'failed': sum(1 for l in logs if l.status == 'failed'),
+            'total': len(logs),
+        })
+    except SMSError as exc:
+        return Response({'error': str(exc)}, status=400)
+
+
+# ─── Transaction history ─────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def transaction_list(request):
+    """List payment transactions with optional filters."""
+    qs = PaymentTransaction.objects.all()
+    provider = request.query_params.get('provider')
+    status_filter = request.query_params.get('status')
+    student_id = request.query_params.get('student_id')
+    if provider:
+        qs = qs.filter(provider=provider)
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if student_id:
+        qs = qs.filter(student_id=student_id)
+
+    data = list(qs.values(
+        'id', 'provider', 'reference', 'external_reference',
+        'phone', 'amount', 'currency', 'status', 'description',
+        'fee_invoice_id', 'student_id', 'failure_reason', 'created_at',
+    ).order_by('-created_at')[:200])
+    return Response({'results': data, 'count': len(data)})
+
+
 from django.http import JsonResponse
 from django.conf import settings
 from django.shortcuts import redirect

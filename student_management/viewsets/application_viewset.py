@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, filters, status
+from rest_framework import viewsets, permissions, filters, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
@@ -6,7 +6,7 @@ from django.utils import timezone
 from accounts.models import User, Student
 from student_management.models.application import Application
 from student_management.models.admission import Admission
-from student_management.models.class_session import StudentPlacement
+from student_settings.models import Enrollment
 from student_management.serializers import ApplicationSerializer
 
 class ApplicationViewSet(viewsets.ModelViewSet):
@@ -14,7 +14,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = ApplicationSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['first_name', 'last_name', 'admission_number', 'email']
+    search_fields = ['first_name', 'last_name', 'email', 'guardian_name', 'phone_number']
     ordering_fields = ['created_at', 'last_name']
 
     def perform_create(self, serializer):
@@ -78,36 +78,52 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             # Copy other demographics
         )
 
-        # 2b. Create Parent Account
-        # Username: P{admission_number}
-        parent_username = f"P{adm_no}"
-        parent_password = parent_username # Initial password
-        
-        # Check if parent user already exists with this username (unlikely for new adm no)
-        # Check by email? If email exists, we might want to check if it's a parent.
-        # BUT current Parent model is OneToOne with Student. So we MUST create a new User/Parent pair 
-        # for this specific student if we want to follow the existing model strictness.
-        
-        parent_user = User(
-            username=parent_username,
-            email=application.email, # Guardian email
-            first_name=application.guardian_name.split()[0] if application.guardian_name else "Parent",
-            last_name=" ".join(application.guardian_name.split()[1:]) if application.guardian_name and len(application.guardian_name.split()) > 1 else "",
-            is_parent=True
-        )
-        parent_user.set_password(parent_password)
-        parent_user._skip_account_creation_signal = True
-        parent_user.save()
-        
+        # 2b. Create Parent Account (or reuse existing parent)
         from accounts.models import Parent
-        Parent.objects.create(
-            user=parent_user,
-            student=student,
-            first_name=parent_user.first_name,
-            last_name=parent_user.last_name,
-            phone=application.phone_number,
-            email=application.email
-        )
+        existing_parent_user_id = request.data.get('existing_parent_user_id')
+
+        if existing_parent_user_id:
+            # Reuse an existing parent user account (e.g. sibling scenario)
+            try:
+                parent_user = User.objects.get(id=existing_parent_user_id, is_parent=True)
+            except User.DoesNotExist:
+                raise serializers.ValidationError('Specified parent user account not found.')
+
+            Parent.objects.create(
+                user=parent_user,
+                student=student,
+                first_name=parent_user.first_name,
+                last_name=parent_user.last_name,
+                phone=application.phone_number,
+                email=application.email,
+                relation_ship=application.guardian_relationship or '',
+            )
+            parent_username = parent_user.username
+            parent_password = None  # Existing account, no new password
+        else:
+            # Create a new parent user account
+            parent_username = f"P{adm_no}"
+            parent_password = parent_username  # Initial password
+
+            parent_user = User(
+                username=parent_username,
+                email=application.email,  # Guardian email
+                first_name=application.guardian_name.split()[0] if application.guardian_name else "Parent",
+                last_name=" ".join(application.guardian_name.split()[1:]) if application.guardian_name and len(application.guardian_name.split()) > 1 else "",
+                is_parent=True
+            )
+            parent_user.set_password(parent_password)
+            parent_user._skip_account_creation_signal = True
+            parent_user.save()
+
+            Parent.objects.create(
+                user=parent_user,
+                student=student,
+                first_name=parent_user.first_name,
+                last_name=parent_user.last_name,
+                phone=application.phone_number,
+                email=application.email
+            )
         
         # 3. Create Admission Record
         Admission.objects.create(
@@ -115,6 +131,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             student=student,
             admission_number=adm_no,
             admission_date=timezone.now().date(),
+            campus=application.campus,
             admitted_by=request.user,
             created_by=request.user
         )
@@ -145,19 +162,22 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         stream_id = request.data.get('stream_id')
         stream = Stream.objects.get(id=stream_id) if stream_id else None
         
-        StudentPlacement.objects.create(
+        Enrollment.objects.create(
             student=student,
             intake=application.intake,
             academic_year=academic_year,
-            term=term, # Might fail if no active term
+            term=term,
             curriculum=application.applying_for_curriculum,
-            curriculum_level=application.applying_for_grade.curriculum_level, # Use grade's level
+            curriculum_level=getattr(application.applying_for_grade, 'curriculum_level', None),
             grade=grade,
             stream=stream,
-            session_type='admission',
-            session_status='active',
-            start_date=timezone.now().date(),
-            created_by=request.user
+            campus=application.campus,
+            enrollment_type='new_admission',
+            status='active',
+            is_active=True,
+            enrollment_date=timezone.now().date(),
+            created_by=request.user,
+            updated_by=request.user
         )
         
         # 5. Update Application
@@ -172,13 +192,19 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             # Don't fail the transaction just because email failed
             print(f"Failed to send admission email: {e}")
         
-        return Response({
+        response_data = {
             'success': True,
             'student_id': student.id,
             'admission_number': adm_no,
             'username': username,
-            'password': password 
-        })
+            'password': password,
+            'parent_username': parent_username,
+            'existing_parent': existing_parent_user_id is not None,
+        }
+        if parent_password:
+            response_data['parent_password'] = parent_password
+
+        return Response(response_data)
 
     @action(detail=False, methods=['get'])
     def dashboard_stats(self, request):
@@ -189,7 +215,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         from django.db.models import Count, Q
         from django.db.models.functions import TruncMonth
         from student_management.models.admission import Admission
-        from student_management.models.class_session import StudentPlacement
+        from student_settings.models import Enrollment
         from accounts.models import Student
         from rest_framework import serializers # Helper import just in case
         
@@ -198,9 +224,9 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         admitted = self.get_queryset().filter(application_status='accepted').count()
         pending = self.get_queryset().filter(application_status__in=['pending', 'interview']).count()
         
-        # For repeaters/transfers we need ClassSession or explicit flags
-        repeaters = StudentPlacement.objects.filter(session_type='repeat', session_status='active').count()
-        transfers = StudentPlacement.objects.filter(session_type='transfer', session_status='active').count()
+        # For repeaters/transfers we need Enrollment
+        repeaters = Enrollment.objects.filter(enrollment_type='repeat', status='active', is_active=True).count()
+        transfers = Enrollment.objects.filter(enrollment_type='transfer_in', status='active', is_active=True).count()
 
         # 2. Charts - Trends (Last 6 Months)
         six_months_ago = timezone.now() - timezone.timedelta(days=180)
@@ -253,7 +279,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             })
 
         # 4. Class Distribution by Gender
-        active_sessions = StudentPlacement.objects.filter(session_status='active').values('grade__name', 'student__student__gender').annotate(count=Count('id'))
+        active_sessions = Enrollment.objects.filter(status='active', is_active=True).values('grade__name', 'student__student__gender').annotate(count=Count('id'))
         class_dist = {}
         for item in active_sessions:
             grade = item['grade__name']

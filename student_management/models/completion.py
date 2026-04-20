@@ -36,5 +36,7 @@ class Completion(BaseModel):
         verbose_name = "Completion Record"
         verbose_name_plural = "Completion Records"
 
+        db_table = 'student_completions'
+
     def __str__(self):
         return f"{self.student} - {self.completion_type}"

@@ -13,4 +13,27 @@ urlpatterns = [
     path("complete/", views.paymentComplete, name="complete"),
     path("create-invoice/", views.create_invoice, name="create_invoice"),
     path("invoice-detail/<int:id>/", views.invoice_detail, name="invoice_detail"),
+
+    # ── Gateway configuration (admin) ────────────────────────────────────────
+    path("gateway-configs/", views.list_gateway_configs, name="list_gateway_configs"),
+    path("gateway-configs/save/", views.save_gateway_config, name="save_gateway_config"),
+    path("gateway-configs/<int:pk>/delete/", views.delete_gateway_config, name="delete_gateway_config"),
+
+    # ── Daraja / M-Pesa ──────────────────────────────────────────────────────
+    path("mpesa/stk-push/", views.daraja_stk_push, name="daraja_stk_push"),
+    path("mpesa/stk-query/", views.daraja_stk_query, name="daraja_stk_query"),
+    path("mpesa/callback/", views.daraja_callback, name="daraja_callback"),
+    path("mpesa/register-urls/", views.daraja_register_urls, name="daraja_register_urls"),
+
+    # ── Paystack ─────────────────────────────────────────────────────────────
+    path("paystack/initialize/", views.paystack_initialize, name="paystack_initialize"),
+    path("paystack/verify/", views.paystack_verify, name="paystack_verify"),
+    path("paystack/webhook/", views.paystack_webhook, name="paystack_webhook"),
+
+    # ── SMS ──────────────────────────────────────────────────────────────────
+    path("sms/send/", views.send_sms, name="send_sms"),
+    path("sms/send-bulk/", views.send_sms_bulk, name="send_sms_bulk"),
+
+    # ── Transactions ─────────────────────────────────────────────────────────
+    path("transactions/", views.transaction_list, name="transaction_list"),
 ]

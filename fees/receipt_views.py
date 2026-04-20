@@ -13,8 +13,9 @@ from django.utils import timezone
 from decimal import Decimal, InvalidOperation as DecimalException
 from datetime import date, timedelta
 
-from finance.models import Receipt, PaymentMethod
+from finance.models import Receipt, PaymentMethod, StudentPrepayment
 from accounts.models import Student
+from fees.models import FeeInvoice
 
 
 class ReceiptViewSet(viewsets.ViewSet):
@@ -107,7 +108,25 @@ class ReceiptViewSet(viewsets.ViewSet):
         start_idx = (page - 1) * page_size
         end_idx = start_idx + page_size
         
-        paginated_receipts = receipts[start_idx:end_idx]
+        paginated_receipts = list(receipts[start_idx:end_idx])
+        
+        # Batch-compute student balances for balance summary on receipts
+        student_ids = set(r.student_id for r in paginated_receipts if r.student_id)
+        inv_bal_map = {}
+        prep_map = {}
+        if student_ids:
+            for row in FeeInvoice.objects.filter(
+                student_id__in=student_ids,
+            ).exclude(status='VOID').values('student_id').annotate(
+                total=Sum('balance'),
+            ):
+                inv_bal_map[row['student_id']] = float(row['total'] or 0)
+            for row in StudentPrepayment.objects.filter(
+                student_id__in=student_ids, is_fully_used=False,
+            ).values('student_id').annotate(
+                total=Sum('balance'),
+            ):
+                prep_map[row['student_id']] = float(row['total'] or 0)
         
         # Format response data
         results = []
@@ -134,6 +153,15 @@ class ReceiptViewSet(viewsets.ViewSet):
                 data['student_id'] = receipt.student.id
                 data['student_name'] = receipt.student.student.get_full_name if receipt.student.student else 'Unknown'
                 data['admission_no'] = receipt.student.admission_number
+                # Balance summary for receipt printing
+                inv_bal = inv_bal_map.get(receipt.student_id, 0)
+                prep_credit = prep_map.get(receipt.student_id, 0)
+                current_balance = inv_bal - prep_credit
+                data['balance_info'] = {
+                    'previous_balance': round(current_balance + float(receipt.amount_received), 2),
+                    'this_payment': float(receipt.amount_received),
+                    'current_balance': round(current_balance, 2),
+                }
             
             # Add type-specific fields
             if receipt.receipt_type == 'STUDENT_FEE':

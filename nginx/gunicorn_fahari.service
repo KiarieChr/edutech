@@ -1,0 +1,51 @@
+# /etc/systemd/system/gunicorn_fahari.service
+# Gunicorn service for Fahari Academia Django backend
+#
+# Install:
+#   sudo cp gunicorn_fahari.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gunicorn_fahari
+
+[Unit]
+Description=Gunicorn — Fahari Academia Django API
+After=network.target
+
+[Service]
+Type=notify
+User=deploy
+Group=www-data
+WorkingDirectory=/home/deploy/fahari_academia
+
+# Activate the virtualenv and run Gunicorn
+ExecStart=/home/deploy/fahari_academia/venv/bin/gunicorn \
+    --workers 4 \
+    --worker-class gthread \
+    --threads 2 \
+    --worker-tmp-dir /dev/shm \
+    --timeout 120 \
+    --graceful-timeout 30 \
+    --keep-alive 5 \
+    --bind unix:/run/gunicorn/fahari_academia.sock \
+    --access-logfile /var/log/gunicorn/fahari_academia.access.log \
+    --error-logfile  /var/log/gunicorn/fahari_academia.error.log \
+    --log-level info \
+    config.wsgi:application
+
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# Socket directory must exist before start
+RuntimeDirectory=gunicorn
+RuntimeDirectoryMode=0755
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Environment — production settings
+Environment="DJANGO_SETTINGS_MODULE=config.settings"
+Environment="DJANGO_DEBUG=False"
+# Add more secrets here or use EnvironmentFile:
+# EnvironmentFile=/home/deploy/fahari_academia/.env
+
+[Install]
+WantedBy=multi-user.target

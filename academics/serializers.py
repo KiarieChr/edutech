@@ -7,6 +7,7 @@ class ClassSessionSerializer(serializers.ModelSerializer):
     academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
     curriculum_name = serializers.CharField(source='curriculum.name', read_only=True)
     curriculum_level_name = serializers.CharField(source='curriculum_level.name', read_only=True, allow_null=True)
+    enrollment_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = ClassSession
@@ -18,12 +19,14 @@ class ClassSessionSerializer(serializers.ModelSerializer):
             'curriculum', 'curriculum_name',
             'curriculum_level', 'curriculum_level_name',
             'status', 'start_date', 'end_date',
+            'enrollment_count',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'name']
 
 class StudentSessionEnrollmentSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.student.full_name', read_only=True)
+    admission_number = serializers.CharField(source='student.admission_number', read_only=True)
     session_name = serializers.CharField(source='session.name', read_only=True)
     intake_name = serializers.CharField(source='intake.name', read_only=True)
     stream_name = serializers.CharField(source='stream.name', read_only=True, allow_null=True)
@@ -31,7 +34,7 @@ class StudentSessionEnrollmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentSessionEnrollment
         fields = [
-            'id', 'student', 'student_name',
+            'id', 'student', 'student_name', 'admission_number',
             'session', 'session_name',
             'intake', 'intake_name',
             'status', 'progression_status', 'is_active',

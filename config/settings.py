@@ -28,7 +28,7 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0', '192.168.100.27','192.168.100.29','10.253.145.53']
+ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.58','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12']
 
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
@@ -80,6 +80,22 @@ PROJECT_APPS = [
     "budgets.apps.BudgetsConfig",
     "finance_reports.apps.FinanceReportsConfig",
     "academics.apps.AcademicsConfig",
+    # Academic Operations modules
+    "timetable.apps.TimetableConfig",
+    "scheduled_lessons.apps.ScheduledLessonsConfig",
+    "lesson_sessions.apps.LessonSessionsConfig",
+    # Daily Attendance
+    "attendance.apps.AttendanceConfig",
+    # Student & Parent Portal
+    "portal.apps.PortalConfig",
+    # Inventory & Stores
+    "inventory.apps.InventoryConfig",
+    # Examinations & Grading
+    "examinations.apps.ExaminationsConfig",
+    # Assignments
+    "assignments.apps.AssignmentsConfig",
+    # Procurement
+    "procurement.apps.ProcurementConfig",
 ]
 
 # Combine all apps
@@ -101,6 +117,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",  # whitenoise to serve static files
+    "core.audit_middleware.AuditMiddleware",       # system-wide audit logging
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -126,8 +143,9 @@ TEMPLATES = [
 ]
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
+        'accounts.authentication.UserTokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.TokenAuthentication',  # kept for backward compat
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',

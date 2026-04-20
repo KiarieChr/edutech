@@ -1,17 +1,19 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.utils import timezone
+from django.db.models import Count, Q
 from .models import (
     AcademicYear, Term, Curriculum, GradeStructure, Stream,
     AdmissionConfig, StudentStatus, PromotionRule, DemographicConfig, SchoolCalendar, Intake,
-    CurriculumLevel
+    CurriculumLevel, LearningArea
 )
 from .serializers import (
     AcademicYearSerializer, TermSerializer, CurriculumSerializer,
     GradeStructureSerializer, StreamSerializer, AdmissionConfigSerializer,
     StudentStatusSerializer, PromotionRuleSerializer, DemographicConfigSerializer,
     SchoolCalendarSerializer, IntakeSerializer, IntakeCreateSerializer,
-    CurriculumLevelSerializer
+    CurriculumLevelSerializer, LearningAreaSerializer
 )
 
 class SoftDeleteViewSet(viewsets.ModelViewSet):
@@ -55,11 +57,191 @@ class TermViewSet(SoftDeleteViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
 
+
 class CurriculumViewSet(SoftDeleteViewSet):
+    """
+    ViewSet for Curriculum management with dashboard statistics.
+    """
     queryset = Curriculum.objects.all()
     serializer_class = CurriculumSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
+    
+    @action(detail=False, methods=['get'])
+    def dashboard_stats(self, request):
+        """
+        Aggregates statistics for the Curriculum Dashboard.
+        
+        Returns metrics on:
+        - Total and active curricula
+        - Total subjects
+        - Classes/grades covered
+        - Learning areas
+        - Subject distribution by curriculum
+        """
+        from timetable.models import Subject
+        
+        # 1. Curriculum Metrics
+        total_curricula = Curriculum.objects.filter(is_deleted=False).count()
+        active_curricula = Curriculum.objects.filter(is_deleted=False, status='active').count()
+        
+        # 2. Subject Metrics
+        total_subjects = Subject.objects.filter(is_active=True).count()
+        
+        # 3. Classes Covered
+        classes_covered = GradeStructure.objects.filter(is_deleted=False, is_active=True).count()
+        
+        # 4. Learning Areas
+        learning_areas_count = LearningArea.objects.filter(is_deleted=False, is_active=True).count()
+        
+        # 5. Subject Distribution by Curriculum (for chart)
+        subject_distribution = (
+            Subject.objects.filter(is_active=True)
+            .values('curriculum__name', 'curriculum__code')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        
+        subject_chart = []
+        for item in subject_distribution:
+            subject_chart.append({
+                'name': item['curriculum__name'] or item['curriculum__code'],
+                'count': item['count']
+            })
+        
+        # 6. Class Coverage by Curriculum Level
+        class_coverage = (
+            GradeStructure.objects.filter(is_deleted=False, is_active=True)
+            .values('curriculum__name', 'curriculum_level__name')
+            .annotate(count=Count('id'))
+            .order_by('curriculum__name', 'curriculum_level__order')
+        )
+        
+        coverage_chart = []
+        for item in class_coverage:
+            coverage_chart.append({
+                'curriculum': item['curriculum__name'],
+                'level': item['curriculum_level__name'] or 'All Levels',
+                'classes': item['count']
+            })
+        
+        # 7. Subject Type Distribution
+        type_distribution = (
+            Subject.objects.filter(is_active=True)
+            .values('subject_type')
+            .annotate(count=Count('id'))
+        )
+        
+        type_chart = []
+        type_colors = {
+            'compulsory': '#16a34a',
+            'optional': '#ca8a04',
+            'elective': '#6366f1'
+        }
+        for item in type_distribution:
+            stype = item['subject_type']
+            type_chart.append({
+                'name': stype.title(),
+                'value': item['count'],
+                'color': type_colors.get(stype, '#6b7280')
+            })
+        
+        # 8. Learning Area Distribution
+        area_distribution = (
+            Subject.objects.filter(is_active=True, learning_area__isnull=False)
+            .values('learning_area__name', 'learning_area__color_hex')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        
+        area_chart = []
+        for item in area_distribution:
+            area_chart.append({
+                'name': item['learning_area__name'],
+                'count': item['count'],
+                'color': item['learning_area__color_hex'] or '#6366f1'
+            })
+        
+        return Response({
+            'metrics': {
+                'total_curricula': total_curricula,
+                'active_curricula': active_curricula,
+                'total_subjects': total_subjects,
+                'classes_covered': classes_covered,
+                'learning_areas': learning_areas_count,
+            },
+            'subject_distribution': subject_chart,
+            'class_coverage': coverage_chart,
+            'type_distribution': type_chart,
+            'area_distribution': area_chart,
+        })
+
+    @action(detail=True, methods=['post'])
+    def phase_out(self, request, pk=None):
+        """
+        Mark a curriculum as phased_out and deactivate all its grades.
+        Optionally deactivate only specific grade levels by name:
+          Body: { "grade_names": ["Class 1", "Class 2", ...], "deactivate_grades": true }
+        """
+        curriculum = self.get_object()
+        grade_names = request.data.get('grade_names', [])
+        deactivate_grades = request.data.get('deactivate_grades', True)
+
+        # Mark curriculum as phased_out
+        curriculum.status = 'phased_out'
+        curriculum.is_active = False
+        curriculum.save()
+
+        grades_updated = 0
+        if deactivate_grades:
+            grade_qs = GradeStructure.objects.filter(
+                curriculum=curriculum, is_deleted=False
+            )
+            if grade_names:
+                grade_qs = grade_qs.filter(name__in=grade_names)
+            grades_updated = grade_qs.update(is_active=False)
+
+        return Response({
+            'success': True,
+            'curriculum': curriculum.name,
+            'status': 'phased_out',
+            'grades_deactivated': grades_updated,
+            'message': f'"{curriculum.name}" marked as phased out. {grades_updated} grade(s) deactivated.'
+        })
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        """Re-activate a previously phased-out curriculum and its grades."""
+        curriculum = self.get_object()
+        grade_names = request.data.get('grade_names', [])
+
+        curriculum.status = 'active'
+        curriculum.is_active = True
+        curriculum.save()
+
+        grade_qs = GradeStructure.objects.filter(
+            curriculum=curriculum, is_deleted=False
+        )
+        if grade_names:
+            grade_qs = grade_qs.filter(name__in=grade_names)
+        grades_updated = grade_qs.update(is_active=True)
+
+        return Response({
+            'success': True,
+            'curriculum': curriculum.name,
+            'status': 'active',
+            'grades_activated': grades_updated,
+            'message': f'"{curriculum.name}" restored. {grades_updated} grade(s) re-activated.'
+        })
+
+
+class LearningAreaViewSet(SoftDeleteViewSet):
+    """ViewSet for managing Learning Areas (subject categories)"""
+    queryset = LearningArea.objects.all()
+    serializer_class = LearningAreaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None
+
 
 class CurriculumLevelViewSet(SoftDeleteViewSet):
     queryset = CurriculumLevel.objects.all()
@@ -67,11 +249,148 @@ class CurriculumLevelViewSet(SoftDeleteViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
 
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('curriculum')
+        from core.models import InstitutionProfile
+        try:
+            inst = InstitutionProfile.get_instance()
+        except Exception:
+            return qs
+
+        itype = inst.institution_type
+
+        # Map institution types to the curriculum level names they include
+        LEVEL_MAP = {
+            'lower_primary': {
+                'CBC': ['Pre-Primary', 'Lower Primary'],
+                '844': ['Primary'],
+            },
+            'upper_primary': {
+                'CBC': ['Upper Primary'],
+                '844': ['Primary'],
+            },
+            'primary': {
+                'CBC': ['Pre-Primary', 'Lower Primary', 'Upper Primary'],
+                '844': ['Primary'],
+            },
+            'secondary': {
+                'CBC': ['Junior Secondary', 'Senior Secondary'],
+                '844': ['Secondary'],
+            },
+            'mixed': None,  # all levels
+        }
+
+        if itype in LEVEL_MAP:
+            mapping = LEVEL_MAP[itype]
+            if mapping is not None:
+                level_q = Q()
+                for curr_code, level_names in mapping.items():
+                    level_q |= Q(curriculum__code=curr_code, name__in=level_names)
+                qs = qs.filter(level_q)
+
+        return qs
+
 class GradeStructureViewSet(SoftDeleteViewSet):
     queryset = GradeStructure.objects.all()
     serializer_class = GradeStructureSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('curriculum', 'curriculum_level')
+        from core.models import InstitutionProfile
+        try:
+            inst = InstitutionProfile.get_instance()
+        except Exception:
+            return qs
+
+        itype = inst.institution_type
+
+        # Map institution types to the CBC curriculum level names they include
+        CBC_LEVELS = {
+            'lower_primary': ['Pre-Primary', 'Lower Primary'],
+            'upper_primary': ['Upper Primary'],
+            'primary':       ['Pre-Primary', 'Lower Primary', 'Upper Primary'],
+            'secondary':     ['Junior Secondary', 'Senior Secondary'],
+            'mixed':         None,  # all CBC levels
+        }
+
+        # Map institution types to the 8-4-4 curriculum level names they include
+        EIGHT_FOUR_LEVELS = {
+            'lower_primary': ['Primary'],   # Class 1-3 (level_order <= 3)
+            'upper_primary': ['Primary'],   # Class 4-8 (level_order 4-8)
+            'primary':       ['Primary'],
+            'secondary':     ['Secondary'],
+            'mixed':         ['Secondary'], # only Form 3 & Form 4 for mixed
+        }
+
+        if itype in CBC_LEVELS:
+            cbc_levels = CBC_LEVELS[itype]
+            eight_four_levels = EIGHT_FOUR_LEVELS[itype]
+
+            # Build CBC filter
+            if cbc_levels is None:
+                cbc_q = Q(curriculum__code='CBC')
+            else:
+                cbc_q = Q(curriculum__code='CBC', curriculum_level__name__in=cbc_levels)
+
+            # Build 8-4-4 filter (with extra range constraints for sub-primary)
+            if itype == 'mixed':
+                eight_four_q = Q(curriculum__code='844', code__in=['F3', 'F4'])
+            elif itype == 'lower_primary':
+                eight_four_q = Q(
+                    curriculum__code='844',
+                    curriculum_level__name='Primary',
+                    level_order__lte=3
+                )
+            elif itype == 'upper_primary':
+                eight_four_q = Q(
+                    curriculum__code='844',
+                    curriculum_level__name='Primary',
+                    level_order__gte=4,
+                    level_order__lte=8
+                )
+            else:
+                eight_four_q = Q(
+                    curriculum__code='844',
+                    curriculum_level__name__in=eight_four_levels
+                )
+
+            qs = qs.filter(cbc_q | eight_four_q)
+
+        # tertiary, university, tvet — no filtering, return all
+        return qs
+
+    @action(detail=False, methods=['post'])
+    def bulk_set_active(self, request):
+        """
+        Bulk activate or deactivate grade structures.
+        Body: { "grade_ids": [1, 2, 3], "is_active": true/false }
+        Can also match by curriculum code: { "curriculum_code": "844", "is_active": false }
+        """
+        grade_ids = request.data.get('grade_ids', [])
+        is_active = request.data.get('is_active', False)
+        curriculum_code = request.data.get('curriculum_code', None)
+
+        qs = GradeStructure.objects.filter(is_deleted=False)
+
+        if grade_ids:
+            qs = qs.filter(id__in=grade_ids)
+        elif curriculum_code:
+            qs = qs.filter(curriculum__code=curriculum_code)
+        else:
+            return Response(
+                {'error': 'Provide grade_ids or curriculum_code'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        count = qs.update(is_active=is_active)
+        return Response({
+            'success': True,
+            'updated_count': count,
+            'is_active': is_active,
+            'message': f'{count} grade(s) {"activated" if is_active else "deactivated"} successfully.'
+        })
 
 class StreamViewSet(SoftDeleteViewSet):
     queryset = Stream.objects.all()
@@ -134,7 +453,7 @@ class EnrollmentViewSet(SoftDeleteViewSet):
     queryset = Enrollment.objects.all()
     serializer_class = EnrollmentSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['student', 'academic_year', 'term', 'curriculum', 'grade', 'stream', 'status', 'is_active']
+    filterset_fields = ['student', 'academic_year', 'term', 'curriculum', 'grade', 'stream', 'status', 'enrollment_type', 'is_active']
     search_fields = ['student__student__first_name', 'student__student__last_name', 'remarks']
     ordering_fields = ['enrollment_date', 'created_at']
     
@@ -598,4 +917,109 @@ class EnrollmentViewSet(SoftDeleteViewSet):
             'success': True,
             'student_id': student_id,
             'timeline': serializer.data
+        })
+
+    @action(detail=False, methods=['get'], url_path='unreported')
+    def unreported(self, request):
+        """
+        Get students who were enrolled in the previous term but haven't
+        reported (no active enrollment) in the current term.
+        """
+        current_year = AcademicYear.objects.filter(is_current=True).first()
+        current_term = Term.objects.filter(is_current=True).first()
+
+        if not current_year or not current_term:
+            return Response({
+                'success': False,
+                'error': 'No current academic year or term configured.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find the previous term
+        prev_term = Term.objects.filter(
+            academic_year=current_term.academic_year,
+            start_date__lt=current_term.start_date,
+            is_deleted=False
+        ).order_by('-start_date').first()
+
+        if not prev_term:
+            # Try last term of the previous academic year
+            prev_year = AcademicYear.objects.filter(
+                start_date__lt=current_year.start_date,
+                is_deleted=False
+            ).order_by('-start_date').first()
+            if prev_year:
+                prev_term = Term.objects.filter(
+                    academic_year=prev_year,
+                    is_deleted=False
+                ).order_by('-start_date').first()
+
+        if not prev_term:
+            return Response({
+                'success': True,
+                'current_term': current_term.name,
+                'current_year': current_year.name,
+                'previous_term': None,
+                'unreported': [],
+                'total': 0
+            })
+
+        # Students enrolled in previous term
+        prev_student_ids = set(
+            Enrollment.objects.filter(
+                term=prev_term,
+                is_deleted=False,
+                status__in=['active', 'promoted']
+            ).values_list('student_id', flat=True)
+        )
+
+        # Students already enrolled in current term
+        current_student_ids = set(
+            Enrollment.objects.filter(
+                term=current_term,
+                academic_year=current_year,
+                is_deleted=False,
+            ).values_list('student_id', flat=True)
+        )
+
+        # Unreported = in previous term but not in current term
+        unreported_ids = prev_student_ids - current_student_ids
+
+        # Also filter: student must still be "active" status (not withdrawn/expelled/etc.)
+        unreported_enrollments = Enrollment.objects.filter(
+            student_id__in=unreported_ids,
+            term=prev_term,
+            is_deleted=False,
+            student__status='active'
+        ).select_related(
+            'student', 'student__student', 'grade', 'stream', 'curriculum'
+        ).order_by('student__student__first_name')
+
+        # Optional grade filter
+        grade_filter = request.query_params.get('grade')
+        if grade_filter:
+            unreported_enrollments = unreported_enrollments.filter(grade_id=grade_filter)
+
+        results = []
+        for enr in unreported_enrollments:
+            results.append({
+                'student_id': enr.student_id,
+                'admission_number': enr.student.admission_number,
+                'student_name': enr.student.student.get_full_name() if callable(enr.student.student.get_full_name) else str(enr.student.student.get_full_name),
+                'grade_id': enr.grade_id,
+                'grade_name': enr.grade.name if enr.grade else '',
+                'stream_id': enr.stream_id,
+                'stream_name': enr.stream.name if enr.stream else '',
+                'curriculum_id': enr.curriculum_id,
+                'curriculum_name': enr.curriculum.name if enr.curriculum else '',
+                'last_term': prev_term.name,
+                'last_year': str(prev_term.academic_year.name) if prev_term.academic_year else '',
+            })
+
+        return Response({
+            'success': True,
+            'current_term': current_term.name,
+            'current_year': current_year.name,
+            'previous_term': prev_term.name,
+            'unreported': results,
+            'total': len(results)
         })

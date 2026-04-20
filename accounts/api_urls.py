@@ -4,7 +4,8 @@ from rest_framework.routers import DefaultRouter
 from .api_views import (
     UserViewSet,
     LoginAPIView, FirstTimeSetupAPIView, LogoutAPIView,
-    ValidateUsernameAPIView, RegisterAPIView, DashboardStatsAPIView,
+    ValidateUsernameAPIView, ValidateEmailAPIView, CheckGuardianEmailAPIView,
+    RegisterAPIView, DashboardStatsAPIView,
     DebugDashboardView, csrf, MeAPIView,FirstTimeSetupStatusAPIView, SetupCompleteAPIView,
     RoleViewSet, PermissionViewSet,
     ForgotPasswordAPIView, VerifyOTPAPIView, ResetPasswordAPIView
@@ -42,6 +43,8 @@ urlpatterns = [
     
     # Utility
     path('validate-username/', ValidateUsernameAPIView.as_view(), name='api_validate_username'),
+    path('validate-email/', ValidateEmailAPIView.as_view(), name='api_validate_email'),
+    path('check-guardian-email/', CheckGuardianEmailAPIView.as_view(), name='api_check_guardian_email'),
     
     # Include router URLs
     path('', include(router.urls)),

@@ -92,6 +92,10 @@ class StudentPlacement(BaseModel):
         indexes = [
             models.Index(fields=['student', 'session_status']),
         ]
+        
+        db_table = 'student_placements'
+        
+
 
     def __str__(self):
         return f"{self.student} - {self.grade} ({self.academic_year})"

@@ -22,9 +22,34 @@ router.register(r'leave-applications', LeaveApplicationViewSet, basename='leave-
 router.register(r'leave-balances', EmployeeLeaveBalanceViewSet, basename='leave-balance')
 
 # Payroll
+router.register(r'job-grades', JobGradeViewSet, basename='job-grade')
 router.register(r'payroll-periods', PayrollPeriodViewSet, basename='payroll-period')
 router.register(r'payroll-calculations', PayrollCalculationViewSet, basename='payroll-calculation')
 router.register(r'payslips', PayslipViewSet, basename='payslip')
+router.register(r'pay-grade-steps', PayGradeStepViewSet, basename='pay-grade-step')
+router.register(r'payroll-accounts', PayrollAccountViewSet, basename='payroll-account')
+router.register(r'employee-pay-profiles', EmployeePayProfileViewSet, basename='employee-pay-profile')
+router.register(r'employee-earnings', EmployeeEarningViewSet, basename='employee-earning')
+router.register(r'employee-deductions', EmployeeDeductionViewSet, basename='employee-deduction')
+router.register(r'group-earnings', GroupEarningViewSet, basename='group-earning')
+router.register(r'group-deductions', GroupDeductionViewSet, basename='group-deduction')
+router.register(r'pension-schemes', PensionSchemeViewSet, basename='pension-scheme')
+router.register(r'pension-grade-rates', PensionSchemeGradeRateViewSet, basename='pension-grade-rate')
+router.register(r'pension-enrollments', EmployeePensionEnrollmentViewSet, basename='pension-enrollment')
+router.register(r'pension-contributions', PensionContributionViewSet, basename='pension-contribution')
+
+# HRMS Enhancement Routes
+router.register(r'positions', PositionViewSet, basename='position')
+router.register(r'lifecycle-logs', EmployeeLifecycleLogViewSet, basename='lifecycle-log')
+router.register(r'employee-lifecycle', EmployeeLifecycleViewSet, basename='employee-lifecycle')
+router.register(r'bulk-imports', BulkImportSessionViewSet, basename='bulk-import')
+router.register(r'employee-documents', EmployeeDocumentViewSet, basename='employee-document')
+router.register(r'automation-rules', HRAutomationRuleViewSet, basename='automation-rule')
+router.register(r'notification-preferences', HRNotificationPreferenceViewSet, basename='notification-preference')
+router.register(r'org-chart', OrgChartViewSet, basename='org-chart')
+router.register(r'hr-analytics', HRAnalyticsViewSet, basename='hr-analytics')
+router.register(r'payroll-dashboard', PayrollDashboardViewSet, basename='payroll-dashboard')
+router.register(r'payroll-settings', PayrollSettingsViewSet, basename='payroll-settings')
 
 app_name = 'hr_payroll'
 
@@ -122,4 +147,9 @@ urlpatterns = [
     path('api/reports/batch-payslips/', 
          batch_generate_payslips, 
          name='api-batch-payslips'),
+    
+    # ========================================================================
+    # REST API (ViewSets via Router)
+    # ========================================================================
+    path('api/', include(router.urls)),
 ]

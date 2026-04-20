@@ -6,12 +6,32 @@ from django.conf.urls.static import static
 from django.views import defaults as default_views
 from django.conf.urls.i18n import i18n_patterns
 from django.views.i18n import JavaScriptCatalog
+from rest_framework.routers import DefaultRouter
 
-admin.site.site_header = "SkyLearn Admin"
+from core.api_views import (
+    list_commands, run_command,
+    institution_profile_detail, institution_profile_update,
+    AuditLogViewSet, SystemConfigurationViewSet, bulk_update_config,
+    api_landing,
+)
+
+admin.site.site_header = "Fahari Academia Admin"
+
+# ── DRF Router for core APIs ────────────────────────────────────────────────
+core_router = DefaultRouter()
+core_router.register(r'audit-logs', AuditLogViewSet, basename='audit-log')
+core_router.register(r'system-config', SystemConfigurationViewSet, basename='system-config')
 
 urlpatterns = [
+    path("", api_landing, name="api-landing"),
     path("admin/", admin.site.urls),
     path("i18n/", include("django.conf.urls.i18n")),
+    path('api/system/commands/', list_commands, name='list-commands'),
+    path('api/system/run-command/', run_command, name='run-command'),
+    path('api/institution/', institution_profile_detail, name='institution-profile'),
+    path('api/institution/update/', institution_profile_update, name='institution-profile-update'),
+    path('api/', include(core_router.urls)),
+    path('api/system-config/bulk-update/', bulk_update_config, name='system-config-bulk-update'),
     path('api/settings/', include('student_settings.urls')),
     path('api/recruitment/', include('recruitment.urls')),
     path('api/student-management/', include('student_management.urls')),
@@ -21,8 +41,18 @@ urlpatterns = [
     path('api/finance-reports/', include('finance_reports.urls')),
     path('api/invoicing/', include('invoicing.urls')),
     path('api/payables/', include('payables.urls')),
+    path('api/inventory/', include('inventory.urls')),
+    path('api/procurement/', include('procurement.urls')),
+    path('api/budgets/', include('budgets.urls')),
     path('api/fees/', include('fees.urls')),
     path('api/academics/', include('academics.urls')),
+    path('api/examinations/', include('examinations.urls')),
+    path('api/timetable/', include('timetable.urls')),
+    path('api/scheduled/', include('scheduled_lessons.urls')),
+    path('api/lesson-sessions/', include('lesson_sessions.urls')),
+    path('api/attendance/', include('attendance.urls')),
+    path('api/portal/', include('portal.urls')),
+    path('api/assignments/', include('assignments.urls')),
     path('workforce/', include('workforce.api_urls')),
     #path('api/auth/', rest_framework.urls)
 ]
