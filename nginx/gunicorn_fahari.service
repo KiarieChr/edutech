@@ -12,12 +12,12 @@ After=network.target
 
 [Service]
 Type=notify
-User=deploy
+User=www-data
 Group=www-data
-WorkingDirectory=/home/deploy/fahari_academia
+WorkingDirectory=/var/www/edutech
 
 # Activate the virtualenv and run Gunicorn
-ExecStart=/home/deploy/fahari_academia/venv/bin/gunicorn \
+ExecStart=/var/www/edutech/venv/bin/gunicorn \
     --workers 4 \
     --worker-class gthread \
     --threads 2 \
@@ -26,8 +26,8 @@ ExecStart=/home/deploy/fahari_academia/venv/bin/gunicorn \
     --graceful-timeout 30 \
     --keep-alive 5 \
     --bind unix:/run/gunicorn/fahari_academia.sock \
-    --access-logfile /var/log/gunicorn/fahari_academia.access.log \
-    --error-logfile  /var/log/gunicorn/fahari_academia.error.log \
+    --access-logfile /var/log/gunicorn/edutech.access.log \
+    --error-logfile  /var/log/gunicorn/edutech.error.log \
     --log-level info \
     config.wsgi:application
 
