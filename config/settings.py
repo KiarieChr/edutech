@@ -28,12 +28,12 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.58','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12','api.royalsoftwares.co.ke','www.api.royalsoftwares.co.ke']
+ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.8','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12','api.royalsoftwares.co.ke','www.api.royalsoftwares.co.ke']
 
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
 
-ENVIRONMENT = 'production'
+ENVIRONMENT = 'development'
 # Application definition
 
 DJANGO_APPS = [
@@ -96,6 +96,8 @@ PROJECT_APPS = [
     "assignments.apps.AssignmentsConfig",
     # Procurement
     "procurement.apps.ProcurementConfig",
+    # Fleet Management
+    "fleet.apps.FleetConfig",
 ]
 
 # Combine all apps
@@ -373,6 +375,8 @@ else:  # development
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://192.168.100.29:5173",
+        "http://192.168.100.58:8000",
+        "http://192.168.100.58:5173",
     ]
     CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
     # For development convenience
@@ -407,12 +411,16 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # Session settings (important for authentication)
-SESSION_COOKIE_SAMESITE = 'Lax'
+# For production (HTTPS): use SameSite=None to allow cross-origin cookie sending
+# For development (HTTP): use SameSite=Lax (browsers reject None without Secure)
+SESSION_COOKIE_SAMESITE = 'None' if ENVIRONMENT == 'production' else 'Lax'
 SESSION_COOKIE_SECURE = ENVIRONMENT == 'production'
 SESSION_COOKIE_HTTPONLY = True
 
 # CSRF settings
-CSRF_COOKIE_SAMESITE = 'Lax'
+# For production (HTTPS): use SameSite=None to allow cross-origin cookie sending
+# For development (HTTP): use SameSite=Lax (browsers reject None without Secure)
+CSRF_COOKIE_SAMESITE = 'None' if ENVIRONMENT == 'production' else 'Lax'
 CSRF_COOKIE_SECURE = ENVIRONMENT == 'production'
 CSRF_COOKIE_HTTPONLY = False  # Allow JS to read CSRF token if needed, or keeping True requires an endpoint to fetch it.
 # Ideally CSRF_COOKIE_HTTPONLY should be False so JS can read it for X-CSRFToken header, 

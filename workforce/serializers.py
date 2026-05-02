@@ -15,7 +15,8 @@ from .models import (
     Campus, Faculty, Department, JobGrade, JobTitle,
     EmployeeJobAssignment, ReportingLine,
     # Attendance
-    AttendancePolicy, WorkSchedule, AttendanceRecord,
+    AttendancePolicy, WorkSchedule, EmployeeWorkSchedule,
+    EmployeeAttendanceAccessProfile, BiometricDevice, AttendanceRecord,
     TeachingSessionAttendance, OvertimeRequest,
     # Leave
     LeaveType, EmployeeLeaveBalance, LeaveApplication,
@@ -514,6 +515,58 @@ class WorkScheduleSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = WorkSchedule
+        fields = '__all__'
+
+
+class EmployeeWorkScheduleSerializer(serializers.ModelSerializer):
+    """Employee work schedule serializer"""
+    employee_name = serializers.CharField(
+        source='employee.get_full_name',
+        read_only=True
+    )
+    employee_no = serializers.CharField(
+        source='employee.employee_no',
+        read_only=True
+    )
+    work_schedule_name = serializers.CharField(
+        source='work_schedule.name',
+        read_only=True
+    )
+
+    class Meta:
+        model = EmployeeWorkSchedule
+        fields = '__all__'
+
+
+class EmployeeAttendanceAccessProfileSerializer(serializers.ModelSerializer):
+    """Employee attendance access profile serializer"""
+    employee_name = serializers.CharField(
+        source='employee.get_full_name',
+        read_only=True
+    )
+    employee_no = serializers.CharField(
+        source='employee.employee_no',
+        read_only=True
+    )
+    assigned_campus_name = serializers.CharField(
+        source='assigned_campus.name',
+        read_only=True
+    )
+
+    class Meta:
+        model = EmployeeAttendanceAccessProfile
+        fields = '__all__'
+
+
+class BiometricDeviceSerializer(serializers.ModelSerializer):
+    """Biometric device serializer"""
+    campus_name = serializers.CharField(
+        source='campus.name',
+        read_only=True
+    )
+
+    class Meta:
+        model = BiometricDevice
         fields = '__all__'
 
 

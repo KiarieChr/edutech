@@ -1,7 +1,7 @@
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from .models import Account, AccountType, AccountSubType
 from .serializers import AccountSerializer, AccountTypeOptionSerializer, AccountSubTypeOptionSerializer
 
@@ -146,8 +146,15 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 class FinanceSettingsView(viewsets.ViewSet):
     """
     API endpoint that allows Finance Settings to be viewed or updated.
+    GET  /api/finance/settings/ — authenticated users can read
+    POST /api/finance/settings/ — admin-only update
     """
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_permissions(self):
+        if self.action == 'list':
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
 
     def list(self, request):
         # Always return the single instance

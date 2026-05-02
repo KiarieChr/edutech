@@ -8,7 +8,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         current_year = date.today().year
-        start = 2015
+        start = 2010
         end = 2029
 
         created_years = 0

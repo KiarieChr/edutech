@@ -13,6 +13,7 @@ from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
+from math import radians, sin, cos, sqrt, atan2
 
 
 from .core_models import *
@@ -894,6 +895,64 @@ class EmployeePayProfileViewSet(viewsets.ModelViewSet):
 # ATTENDANCE VIEWSETS
 # ============================================================================
 
+class AttendancePolicyViewSet(viewsets.ModelViewSet):
+    """Attendance policy CRUD"""
+    queryset = AttendancePolicy.objects.all()
+    serializer_class = AttendancePolicySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['employee_category', 'is_active']
+    search_fields = ['name']
+    ordering = ['name']
+
+
+class EmployeeAttendanceAccessProfileViewSet(viewsets.ModelViewSet):
+    """Employee-specific attendance access overrides."""
+    queryset = EmployeeAttendanceAccessProfile.objects.select_related(
+        'employee', 'assigned_campus'
+    ).all()
+    serializer_class = EmployeeAttendanceAccessProfileSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['employee', 'is_active', 'assigned_campus']
+    search_fields = ['employee__employee_no', 'employee__first_name', 'employee__last_name']
+    ordering = ['employee__employee_no']
+
+
+class BiometricDeviceViewSet(viewsets.ModelViewSet):
+    """Biometric device CRUD"""
+    queryset = BiometricDevice.objects.select_related('campus').all()
+    serializer_class = BiometricDeviceSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['campus', 'device_type', 'is_active']
+    search_fields = ['device_name', 'device_code', 'location_description']
+    ordering = ['device_name']
+
+
+class WorkScheduleViewSet(viewsets.ModelViewSet):
+    """Work schedule CRUD"""
+    queryset = WorkSchedule.objects.select_related('attendance_policy').all()
+    serializer_class = WorkScheduleSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['attendance_policy', 'schedule_type', 'is_active']
+    search_fields = ['name']
+    ordering = ['name']
+
+
+class EmployeeWorkScheduleViewSet(viewsets.ModelViewSet):
+    """Employee schedule assignment CRUD"""
+    queryset = EmployeeWorkSchedule.objects.select_related(
+        'employee', 'work_schedule'
+    ).all()
+    serializer_class = EmployeeWorkScheduleSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['employee', 'work_schedule', 'is_active']
+    search_fields = ['employee__employee_no', 'employee__first_name', 'employee__last_name', 'work_schedule__name']
+    ordering = ['-effective_from']
+
 class AttendanceRecordViewSet(viewsets.ModelViewSet):
     """Attendance Record ViewSet"""
     queryset = AttendanceRecord.objects.select_related(
@@ -906,19 +965,191 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         'employee', 'status', 'approval_status', 'attendance_date'
     ]
     search_fields = ['employee__employee_no', 'employee__first_name']
+
+    def _resolve_employee(self, request):
+        employee_id = request.data.get('employee_id') or request.query_params.get('employee_id')
+        if employee_id:
+            try:
+                return Employee.objects.get(id=employee_id), None
+            except Employee.DoesNotExist:
+                return None, Response(
+                    {'error': 'Employee not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        employee = getattr(request.user, 'employee_profile', None)
+        if not employee:
+            return None, Response(
+                {'error': 'No employee profile is linked to your account'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return employee, None
+
+    def _resolve_employee_schedule(self, employee):
+        return EmployeeWorkSchedule.objects.select_related(
+            'work_schedule__attendance_policy', 'employee__campus'
+        ).filter(
+            employee=employee,
+            is_active=True
+        ).first()
+
+    def _effective_clock_policy(self, schedule, employee):
+        attendance_policy = schedule.work_schedule.attendance_policy
+        access_profile = EmployeeAttendanceAccessProfile.objects.select_related('assigned_campus').filter(
+            employee=employee,
+            is_active=True
+        ).first()
+
+        enforce_biometric = attendance_policy.requires_biometric
+        allow_remote = attendance_policy.allow_remote_clock_in
+        allow_geo = attendance_policy.allow_geolocation_clock_in
+        require_geofence = attendance_policy.require_on_site_geofence
+
+        if access_profile:
+            if access_profile.enforce_biometric is not None:
+                enforce_biometric = access_profile.enforce_biometric
+            if access_profile.allow_remote_clock_in is not None:
+                allow_remote = access_profile.allow_remote_clock_in
+            if access_profile.allow_geolocation_clock_in is not None:
+                allow_geo = access_profile.allow_geolocation_clock_in
+            if access_profile.require_on_site_geofence is not None:
+                require_geofence = access_profile.require_on_site_geofence
+
+        campus = None
+        if access_profile and access_profile.assigned_campus:
+            campus = access_profile.assigned_campus
+        elif employee.campus:
+            campus = employee.campus
+
+        radius = attendance_policy.default_geofence_radius_meters
+        if campus and campus.geofence_radius_meters:
+            radius = campus.geofence_radius_meters
+        if access_profile and access_profile.geofence_radius_meters:
+            radius = access_profile.geofence_radius_meters
+
+        allowed_methods = []
+        if enforce_biometric:
+            allowed_methods = ['biometric']
+        else:
+            if allow_geo:
+                allowed_methods.append('geolocation')
+            if allow_remote:
+                allowed_methods.append('remote')
+
+        if not allowed_methods:
+            # Always keep one method to prevent dead-end configuration.
+            allowed_methods = ['remote']
+
+        return {
+            'schedule': schedule,
+            'attendance_policy': attendance_policy,
+            'access_profile': access_profile,
+            'campus': campus,
+            'radius': radius,
+            'enforce_biometric': enforce_biometric,
+            'require_geofence': require_geofence,
+            'allowed_methods': allowed_methods,
+        }
+
+    def _distance_meters(self, lat1, lon1, lat2, lon2):
+        earth_radius_m = 6371000
+        dlat = radians(lat2 - lat1)
+        dlon = radians(lon2 - lon1)
+        a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+        c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return earth_radius_m * c
+
+    def _validate_geofence(self, method, policy_data, request):
+        if method != 'geolocation' and not policy_data['require_geofence']:
+            return None
+
+        campus = policy_data['campus']
+        if not campus or campus.latitude is None or campus.longitude is None:
+            return Response(
+                {'error': 'Campus geofence coordinates are not configured'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        latitude = request.data.get('latitude')
+        longitude = request.data.get('longitude')
+        if latitude in [None, ''] or longitude in [None, '']:
+            return Response(
+                {'error': 'Latitude and longitude are required for on-site clocking'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user_lat = float(latitude)
+            user_lon = float(longitude)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'Invalid latitude/longitude values'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        distance = self._distance_meters(
+            user_lat,
+            user_lon,
+            float(campus.latitude),
+            float(campus.longitude)
+        )
+
+        if distance > float(policy_data['radius']):
+            return Response(
+                {
+                    'error': 'You are outside the allowed campus geofence',
+                    'distance_meters': round(distance, 2),
+                    'allowed_radius_meters': float(policy_data['radius'])
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return None
+
+    @action(detail=False, methods=['get'])
+    def my_clock_policy(self, request):
+        """Return effective attendance methods and geofence requirements for logged-in user."""
+        employee = getattr(request.user, 'employee_profile', None)
+        if not employee:
+            return Response(
+                {'error': 'No employee profile is linked to your account'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        schedule = self._resolve_employee_schedule(employee)
+        if not schedule:
+            return Response(
+                {'error': 'No active work schedule'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        policy_data = self._effective_clock_policy(schedule, employee)
+        campus = policy_data['campus']
+
+        return Response({
+            'employee_id': employee.id,
+            'employee_no': employee.employee_no,
+            'employee_name': employee.get_full_name(),
+            'work_schedule': schedule.work_schedule.name,
+            'attendance_policy': policy_data['attendance_policy'].name,
+            'allowed_methods': policy_data['allowed_methods'],
+            'requires_biometric': policy_data['enforce_biometric'],
+            'requires_geofence': policy_data['require_geofence'],
+            'geofence_radius_meters': policy_data['radius'],
+            'campus': {
+                'id': campus.id,
+                'name': campus.name,
+                'latitude': campus.latitude,
+                'longitude': campus.longitude,
+            } if campus else None,
+        })
     
     @action(detail=False, methods=['post'])
     def clock_in(self, request):
         """Clock in for attendance"""
-        employee_id = request.data.get('employee_id')
-        
-        try:
-            employee = Employee.objects.get(id=employee_id)
-        except Employee.DoesNotExist:
-            return Response(
-                {'error': 'Employee not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        employee, error_response = self._resolve_employee(request)
+        if error_response:
+            return error_response
         
         today = timezone.now().date()
         current_time = timezone.now().time()
@@ -946,6 +1177,24 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 {'error': 'No active work schedule'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        policy_data = self._effective_clock_policy(schedule, employee)
+        requested_method = request.data.get('method')
+        if requested_method in [None, '']:
+            requested_method = policy_data['allowed_methods'][0]
+
+        if requested_method not in policy_data['allowed_methods']:
+            return Response(
+                {
+                    'error': f"Method '{requested_method}' is not allowed for your attendance policy",
+                    'allowed_methods': policy_data['allowed_methods']
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        geofence_error = self._validate_geofence(requested_method, policy_data, request)
+        if geofence_error:
+            return geofence_error
         
         # Create or update attendance record
         attendance, created = AttendanceRecord.objects.get_or_create(
@@ -954,14 +1203,20 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             defaults={
                 'work_schedule': schedule.work_schedule,
                 'check_in_time': current_time,
-                'check_in_method': 'mobile',
+                'check_in_method': requested_method,
+                'check_in_latitude': request.data.get('latitude'),
+                'check_in_longitude': request.data.get('longitude'),
+                'check_in_location_text': request.data.get('location_text', ''),
                 'status': 'present'
             }
         )
         
         if not created:
             attendance.check_in_time = current_time
-            attendance.check_in_method = 'mobile'
+            attendance.check_in_method = requested_method
+            attendance.check_in_latitude = request.data.get('latitude')
+            attendance.check_in_longitude = request.data.get('longitude')
+            attendance.check_in_location_text = request.data.get('location_text', '')
             attendance.status = 'present'
             attendance.save()
         
@@ -971,18 +1226,37 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def clock_out(self, request):
         """Clock out for attendance"""
-        employee_id = request.data.get('employee_id')
-        
-        try:
-            employee = Employee.objects.get(id=employee_id)
-        except Employee.DoesNotExist:
-            return Response(
-                {'error': 'Employee not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        employee, error_response = self._resolve_employee(request)
+        if error_response:
+            return error_response
         
         today = timezone.now().date()
         current_time = timezone.now().time()
+
+        schedule = self._resolve_employee_schedule(employee)
+        if not schedule:
+            return Response(
+                {'error': 'No active work schedule'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        policy_data = self._effective_clock_policy(schedule, employee)
+        requested_method = request.data.get('method')
+        if requested_method in [None, '']:
+            requested_method = policy_data['allowed_methods'][0]
+
+        if requested_method not in policy_data['allowed_methods']:
+            return Response(
+                {
+                    'error': f"Method '{requested_method}' is not allowed for your attendance policy",
+                    'allowed_methods': policy_data['allowed_methods']
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        geofence_error = self._validate_geofence(requested_method, policy_data, request)
+        if geofence_error:
+            return geofence_error
         
         # Get today's attendance record
         try:
@@ -1004,7 +1278,10 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         
         # Update attendance record
         attendance.check_out_time = current_time
-        attendance.check_out_method = 'mobile'
+        attendance.check_out_method = requested_method
+        attendance.check_out_latitude = request.data.get('latitude')
+        attendance.check_out_longitude = request.data.get('longitude')
+        attendance.check_out_location_text = request.data.get('location_text', '')
         
         # Calculate hours worked
         from datetime import datetime, date

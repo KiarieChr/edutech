@@ -213,6 +213,11 @@ class Campus(AuditedModel):
     phone = models.CharField(max_length=30, blank=True)
     email = models.EmailField(blank=True)
     principal_name = models.CharField(max_length=200, blank=True)
+
+    # Optional campus geofence anchor for on-site attendance
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    geofence_radius_meters = models.PositiveIntegerField(default=200)
     
     class Meta:
         db_table = 'hr_campus'
@@ -711,6 +716,11 @@ class AttendancePolicy(AuditedModel):
     )
     
     requires_biometric = models.BooleanField(default=False)
+    allow_biometric_clock_in = models.BooleanField(default=True)
+    allow_remote_clock_in = models.BooleanField(default=True)
+    allow_geolocation_clock_in = models.BooleanField(default=True)
+    require_on_site_geofence = models.BooleanField(default=False)
+    default_geofence_radius_meters = models.PositiveIntegerField(default=200)
     
     effective_from = models.DateField()
     effective_to = models.DateField(null=True, blank=True)
@@ -795,6 +805,41 @@ class EmployeeWorkSchedule(AuditedModel):
         return f"{self.employee.employee_no} - {self.work_schedule.name}"
 
 
+class EmployeeAttendanceAccessProfile(AuditedModel):
+    """Optional per-employee attendance access overrides."""
+
+    employee = models.OneToOneField(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='attendance_access_profile'
+    )
+
+    # Nullable booleans act as tri-state overrides: None -> inherit policy.
+    enforce_biometric = models.BooleanField(null=True, blank=True)
+    allow_remote_clock_in = models.BooleanField(null=True, blank=True)
+    allow_geolocation_clock_in = models.BooleanField(null=True, blank=True)
+    require_on_site_geofence = models.BooleanField(null=True, blank=True)
+
+    assigned_campus = models.ForeignKey(
+        Campus,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='attendance_profiles'
+    )
+    geofence_radius_meters = models.PositiveIntegerField(null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'hr_employee_attendance_access_profile'
+        verbose_name_plural = 'Employee Attendance Access Profiles'
+
+    def __str__(self):
+        return f"Attendance Access - {self.employee.employee_no}"
+
+
 class BiometricDevice(TimestampedModel):
     """Biometric attendance devices"""
     
@@ -826,6 +871,8 @@ class AttendanceRecord(AuditedModel):
     
     class CheckMethod(models.TextChoices):
         BIOMETRIC = 'biometric', _('Biometric')
+        GEOLOCATION = 'geolocation', _('On-Site Geolocation')
+        REMOTE = 'remote', _('Remote')
         MANUAL = 'manual', _('Manual Entry')
         MOBILE = 'mobile', _('Mobile App')
         SYSTEM = 'system', _('System Generated')

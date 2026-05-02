@@ -94,7 +94,18 @@ ALLOWED_COMMANDS = {
         'description': 'Creates default user roles (Teacher, Lecturer, Parent, Finance Manager, Bursar, HR Manager, Registrar, etc.) with appropriate permissions.',
         'app': 'accounts',
     },
+    'seed_coa': {
+        'label': 'Seed Chart of Accounts',
+        'description': 'Seeds the full standard Chart of Accounts (Assets, Liabilities, Equity, Income, Expenses) required for the Finance module to function.',
+        'app': 'finance',
+    },
+    'seed_student_accounts': {
+        'label': 'Seed Student Fee Accounts',
+        'description': 'Seeds student-related sub-accounts (fee vote heads, student receivables, prepayments). Run AFTER Seed COA.',
+        'app': 'finance',
+    },
 }
+
 
 
 @api_view(['GET'])

@@ -17,6 +17,11 @@ router.register(r'job-grades', JobGradeViewSet, basename='job-grade')
 
 # Attendance
 router.register(r'attendance', AttendanceRecordViewSet, basename='attendance')
+router.register(r'attendance-policies', AttendancePolicyViewSet, basename='attendance-policy')
+router.register(r'employee-attendance-access-profiles', EmployeeAttendanceAccessProfileViewSet, basename='employee-attendance-access-profile')
+router.register(r'work-schedules', WorkScheduleViewSet, basename='work-schedule')
+router.register(r'employee-work-schedules', EmployeeWorkScheduleViewSet, basename='employee-work-schedule')
+router.register(r'biometric-devices', BiometricDeviceViewSet, basename='biometric-device')
 router.register(r'overtime-requests', OvertimeRequestViewSet, basename='overtime-request')
 
 # Leave

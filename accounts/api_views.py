@@ -754,16 +754,41 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        
+        # Status filtering
+        status_param = self.request.query_params.get('status')
         is_active = self.request.query_params.get('is_active')
-        if is_active is not None:
+        
+        if status_param:
+            if status_param.lower() == 'active':
+                qs = qs.filter(is_active=True)
+            elif status_param.lower() == 'inactive':
+                qs = qs.filter(is_active=False)
+        elif is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ('true', '1'))
+            
+        # Role filtering
+        role = self.request.query_params.get('role')
+        if role and role.lower() != 'all':
+            role_l = role.lower()
+            if role_l == 'student':
+                qs = qs.filter(is_student=True)
+            elif role_l == 'lecturer' or role_l == 'teacher':
+                qs = qs.filter(is_lecturer=True)
+            elif role_l == 'parent':
+                qs = qs.filter(is_parent=True)
+            elif role_l == 'admin':
+                qs = qs.filter(is_superuser=True)
+            else:
+                # Try filtering by Group name
+                qs = qs.filter(groups__name__icontains=role)
+                
+        # First login filtering
         is_first_login = self.request.query_params.get('is_first_login')
         if is_first_login is not None:
             qs = qs.filter(is_first_login=is_first_login.lower() in ('true', '1'))
-        is_lecturer = self.request.query_params.get('is_lecturer')
-        if is_lecturer is not None:
-            qs = qs.filter(is_lecturer=is_lecturer.lower() in ('true', '1'))
-        return qs
+            
+        return qs.distinct()
     
     def get_permissions(self):
         """

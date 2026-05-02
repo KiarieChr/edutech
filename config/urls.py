@@ -43,6 +43,7 @@ urlpatterns = [
     path('api/payables/', include('payables.urls')),
     path('api/inventory/', include('inventory.urls')),
     path('api/procurement/', include('procurement.urls')),
+    path('api/fleet/', include('fleet.api_urls')),
     path('api/budgets/', include('budgets.urls')),
     path('api/fees/', include('fees.urls')),
     path('api/academics/', include('academics.urls')),
