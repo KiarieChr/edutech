@@ -13,7 +13,7 @@ from django.utils import timezone
 from decimal import Decimal, InvalidOperation as DecimalException
 from datetime import date, timedelta
 
-from finance.models import Receipt, PaymentMethod, StudentPrepayment
+from finance.models import Receipt, PaymentMethod, StudentPrepayment, Account, Sponsorship
 from accounts.models import Student
 from fees.models import FeeInvoice
 
@@ -72,6 +72,114 @@ class ReceiptViewSet(viewsets.ViewSet):
         
         return queryset
     
+    def _serialize_receipt(self, receipt, allocations_map=None, inv_bal_map=None, prep_map=None):
+        data = {
+            'id': receipt.id,
+            'receipt_number': receipt.receipt_number,
+            'date': receipt.received_date.strftime('%Y-%m-%d'),
+            'receipt_type': receipt.get_receipt_type_display(),
+            'payer_name': receipt.payer_name,
+            'amount': float(receipt.amount_received),
+            'amount_allocated': float(receipt.amount_allocated or 0),
+            'payment_method': receipt.payment_method.name if receipt.payment_method else 'Unknown',
+            'reference': receipt.reference,
+            'issued_by': receipt.received_by.get_full_name if receipt.received_by else 'Unknown',
+            'status': receipt.get_status_display(),
+            'print_count': receipt.print_count,
+            'notes': receipt.notes,
+            'created_at': receipt.created_at.isoformat() if receipt.created_at else None,
+            'reversal_reason': receipt.reversal_reason,
+        }
+        
+        # Add student info for student receipts
+        if receipt.student:
+            data['student_id'] = receipt.student.id
+            data['student_name'] = receipt.student.student.get_full_name if receipt.student.student else 'Unknown'
+            data['admission_no'] = receipt.student.admission_number
+            # Balance summary for receipt printing
+            inv_bal = (inv_bal_map or {}).get(receipt.student_id, 0)
+            prep_credit = (prep_map or {}).get(receipt.student_id, 0)
+            current_balance = inv_bal - prep_credit
+            data['balance_info'] = {
+                'previous_balance': round(current_balance + float(receipt.amount_received), 2),
+                'this_payment': float(receipt.amount_received),
+                'current_balance': round(current_balance, 2),
+            }
+        
+        # Add type-specific fields
+        if receipt.receipt_type == 'STUDENT_FEE':
+            data['fee_category'] = receipt.fee_category
+            data['term'] = receipt.term.name if receipt.term else None
+            data['year'] = receipt.academic_year.name if receipt.academic_year else None
+        elif receipt.receipt_type == 'STUDENT_NON_FEE':
+            data['non_fee_category'] = receipt.non_fee_category
+            data['description'] = receipt.description
+        elif receipt.receipt_type == 'SPONSOR':
+            data['sponsorship_type'] = receipt.sponsorship_type
+            data['sponsorship_id'] = receipt.sponsorship_id
+            data['sponsorship_name'] = receipt.sponsorship.name if receipt.sponsorship else None
+            data['sponsor_type_id'] = receipt.sponsorship.sponsor_type_id if receipt.sponsorship else None
+            data['sponsor_type_name'] = receipt.sponsorship.sponsor_type.name if receipt.sponsorship else None
+            data['allocation_rule'] = receipt.allocation_rule
+            
+            # Child allocations for this sponsor receipt
+            if allocations_map is not None:
+                data['child_allocations'] = allocations_map.get(receipt.id, [])
+            else:
+                child_receipts = Receipt.objects.filter(parent_receipt=receipt).select_related('student', 'student__student')
+                data['child_allocations'] = [
+                    {
+                        'id': child.id,
+                        'receipt_number': child.receipt_number,
+                        'date': child.received_date.strftime('%Y-%m-%d'),
+                        'student_id': child.student_id,
+                        'student_name': child.student.student.get_full_name if child.student and child.student.student else 'Unknown',
+                        'admission_no': child.student.admission_number if child.student else '',
+                        'amount': float(child.amount_received),
+                        'status': child.get_status_display()
+                    }
+                    for child in child_receipts
+                ]
+        elif receipt.receipt_type == 'GENERAL':
+            data['income_account'] = receipt.income_account.name if receipt.income_account else None
+            data['description'] = receipt.description
+            
+        return data
+
+    def retrieve(self, request, pk=None):
+        try:
+            receipt = Receipt.objects.select_related(
+                'student',
+                'student__student',
+                'payment_method',
+                'received_by',
+                'term',
+                'academic_year',
+                'income_account',
+                'sponsorship',
+                'sponsorship__sponsor_type'
+            ).get(pk=pk)
+        except Receipt.DoesNotExist:
+            return Response({'detail': 'Receipt not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Compute student balance info if needed
+        inv_bal_map = {}
+        prep_map = {}
+        if receipt.student:
+            inv_bal_total = FeeInvoice.objects.filter(
+                student=receipt.student,
+            ).exclude(status='VOID').aggregate(total=Sum('balance'))['total'] or 0
+            
+            prep_total = StudentPrepayment.objects.filter(
+                student=receipt.student, is_fully_used=False,
+            ).aggregate(total=Sum('balance'))['total'] or 0
+            
+            inv_bal_map[receipt.student_id] = float(inv_bal_total)
+            prep_map[receipt.student_id] = float(prep_total)
+            
+        data = self._serialize_receipt(receipt, inv_bal_map=inv_bal_map, prep_map=prep_map)
+        return Response(data)
+
     def list(self, request):
         """
         Get list of receipts with filters and pagination.
@@ -95,7 +203,9 @@ class ReceiptViewSet(viewsets.ViewSet):
             'received_by',
             'term',
             'academic_year',
-            'income_account'
+            'income_account',
+            'sponsorship',
+            'sponsorship__sponsor_type'
         ).order_by('-received_date', '-receipt_number')
         
         # Apply filters
@@ -128,56 +238,29 @@ class ReceiptViewSet(viewsets.ViewSet):
             ):
                 prep_map[row['student_id']] = float(row['total'] or 0)
         
+        # Batch-fetch allocations (child receipts) for sponsor receipts in this page
+        sponsor_receipt_ids = [r.id for r in paginated_receipts if r.receipt_type == 'SPONSOR']
+        allocations_map = {}
+        if sponsor_receipt_ids:
+            child_receipts = Receipt.objects.filter(parent_receipt_id__in=sponsor_receipt_ids).select_related('student', 'student__student')
+            for child in child_receipts:
+                if child.parent_receipt_id not in allocations_map:
+                    allocations_map[child.parent_receipt_id] = []
+                allocations_map[child.parent_receipt_id].append({
+                    'id': child.id,
+                    'receipt_number': child.receipt_number,
+                    'date': child.received_date.strftime('%Y-%m-%d'),
+                    'student_id': child.student_id,
+                    'student_name': child.student.student.get_full_name if child.student and child.student.student else 'Unknown',
+                    'admission_no': child.student.admission_number if child.student else '',
+                    'amount': float(child.amount_received),
+                    'status': child.get_status_display()
+                })
+        
         # Format response data
         results = []
         for receipt in paginated_receipts:
-            data = {
-                'id': receipt.id,
-                'receipt_number': receipt.receipt_number,
-                'date': receipt.received_date.strftime('%Y-%m-%d'),
-                'receipt_type': receipt.get_receipt_type_display(),
-                'payer_name': receipt.payer_name,
-                'amount': float(receipt.amount_received),
-                'payment_method': receipt.payment_method.name if receipt.payment_method else 'Unknown',
-                'reference': receipt.reference,
-                'issued_by': receipt.received_by.get_full_name if receipt.received_by else 'Unknown',
-                'status': receipt.get_status_display(),
-                'print_count': receipt.print_count,
-                'notes': receipt.notes,
-                'created_at': receipt.created_at.isoformat() if receipt.created_at else None,
-                'reversal_reason': receipt.reversal_reason,
-            }
-            
-            # Add student info for student receipts
-            if receipt.student:
-                data['student_id'] = receipt.student.id
-                data['student_name'] = receipt.student.student.get_full_name if receipt.student.student else 'Unknown'
-                data['admission_no'] = receipt.student.admission_number
-                # Balance summary for receipt printing
-                inv_bal = inv_bal_map.get(receipt.student_id, 0)
-                prep_credit = prep_map.get(receipt.student_id, 0)
-                current_balance = inv_bal - prep_credit
-                data['balance_info'] = {
-                    'previous_balance': round(current_balance + float(receipt.amount_received), 2),
-                    'this_payment': float(receipt.amount_received),
-                    'current_balance': round(current_balance, 2),
-                }
-            
-            # Add type-specific fields
-            if receipt.receipt_type == 'STUDENT_FEE':
-                data['fee_category'] = receipt.fee_category
-                data['term'] = receipt.term.name if receipt.term else None
-                data['year'] = receipt.academic_year.name if receipt.academic_year else None
-            elif receipt.receipt_type == 'STUDENT_NON_FEE':
-                data['non_fee_category'] = receipt.non_fee_category
-                data['description'] = receipt.description
-            elif receipt.receipt_type == 'SPONSOR':
-                data['sponsorship_type'] = receipt.sponsorship_type
-                data['allocation_rule'] = receipt.allocation_rule
-            elif receipt.receipt_type == 'GENERAL':
-                data['income_account'] = receipt.income_account.name if receipt.income_account else None
-                data['description'] = receipt.description
-            
+            data = self._serialize_receipt(receipt, allocations_map=allocations_map, inv_bal_map=inv_bal_map, prep_map=prep_map)
             results.append(data)
         
         return Response({
@@ -287,8 +370,16 @@ class ReceiptViewSet(viewsets.ViewSet):
                 receipt.description = data.get('description')
                 
             elif receipt_type == 'SPONSOR':
-                receipt.sponsorship_type = data.get('sponsorship_type') or data.get('sponsorshipType')
-                receipt.allocation_rule = data.get('allocation_rule') or data.get('allocationRule')
+                sponsorship_id = data.get('sponsorship_id') or data.get('sponsorshipId')
+                if sponsorship_id:
+                    try:
+                        receipt.sponsorship = Sponsorship.objects.get(pk=sponsorship_id)
+                    except Sponsorship.DoesNotExist:
+                        return Response({'error': f'Sponsorship with ID {sponsorship_id} not found'}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({'error': 'Sponsorship program is required for Sponsor receipts'}, status=status.HTTP_400_BAD_REQUEST)
+                
+                receipt.allocation_rule = data.get('allocation_rule') or data.get('allocationRule') or 'SPECIFIC'
             
             elif receipt_type == 'GENERAL':
                  receipt.description = data.get('description')
@@ -421,6 +512,8 @@ class ReceiptViewSet(viewsets.ViewSet):
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()  # Print full traceback to server logs
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['post'])
@@ -498,6 +591,155 @@ class ReceiptViewSet(viewsets.ViewSet):
         # Logic to reverse accounting entries/allocations could go here
         
         return Response({'status': 'REVERSED', 'message': 'Receipt reversed'})
+
+    @action(detail=True, methods=['post'])
+    def allocate_sponsor(self, request, pk=None):
+        """
+        Allocate a portion of a Sponsor receipt to a student, creating a STUDENT_FEE receipt.
+        """
+        from django.db import transaction
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        from finance.models import ReceiptAllocation, StudentPrepayment
+        from fees.models import FeeInvoiceItem
+        
+        try:
+            sponsor_receipt = Receipt.objects.get(pk=pk)
+        except Receipt.DoesNotExist:
+            return Response({'detail': 'Sponsor receipt not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        if sponsor_receipt.receipt_type != 'SPONSOR':
+            return Response({'detail': 'Receipt is not of type Sponsor.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if sponsor_receipt.status == 'REVERSED':
+            return Response({'detail': 'Cannot allocate a reversed receipt.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        student_id = request.data.get('student_id')
+        amount_val = request.data.get('amount')
+        
+        if not student_id:
+            return Response({'detail': 'student_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            student = Student.objects.get(pk=student_id)
+        except Student.DoesNotExist:
+            return Response({'detail': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        try:
+            amount = Decimal(str(amount_val))
+        except (DecimalException, ValueError, TypeError):
+            return Response({'detail': 'Invalid amount format.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if amount <= 0:
+            return Response({'detail': 'Amount must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Calculate unallocated amount on the sponsor receipt
+        unallocated = sponsor_receipt.amount_received - sponsor_receipt.amount_allocated
+        if amount > unallocated:
+            return Response({'detail': f'Insufficient unallocated amount. Unallocated: {unallocated}'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        with transaction.atomic():
+            # 1. Generate receipt number for student receipt
+            last_receipt = Receipt.objects.order_by('-id').first()
+            last_num = int(last_receipt.receipt_number.split('-')[-1]) if last_receipt else 0
+            new_num = f"RCT-2026-{str(last_num + 1).zfill(4)}"
+            
+            # 2. Create the STUDENT_FEE receipt
+            student_receipt = Receipt(
+                receipt_number=new_num,
+                received_date=date.today(),
+                receipt_type='STUDENT_FEE',
+                payer_name=sponsor_receipt.payer_name,
+                student=student,
+                sponsorship=sponsor_receipt.sponsorship,
+                parent_receipt=sponsor_receipt,
+                amount_received=amount,
+                payment_method=sponsor_receipt.payment_method,
+                reference=f"Sponsor Alloc: {sponsor_receipt.receipt_number}",
+                received_by=request.user if request.user.is_authenticated else None,
+                status='POSTED',
+                is_posted=True,
+                posted_at=timezone.now(),
+                notes=f"Allocated from Sponsor Receipt {sponsor_receipt.receipt_number}."
+            )
+            student_receipt.save()
+            
+            # 3. Find open invoice items for the student, sorted oldest first
+            open_items = FeeInvoiceItem.objects.filter(
+                invoice__student=student,
+                invoice__status__in=['SENT', 'PARTIALLY_PAID', 'OVERDUE']
+            ).exclude(
+                invoice__status='VOID'
+            ).order_by('invoice__date_issued', 'id')
+            
+            remaining_to_allocate = amount
+            total_allocated = Decimal('0.00')
+            
+            for item in open_items:
+                if remaining_to_allocate <= 0:
+                    break
+                    
+                # Calculate item's outstanding balance
+                allocated_to_item = ReceiptAllocation.objects.filter(invoice_item=item).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+                item_balance = item.amount - allocated_to_item
+                
+                if item_balance > 0:
+                    alloc_amount = min(remaining_to_allocate, item_balance)
+                    
+                    ReceiptAllocation.objects.create(
+                        receipt=student_receipt,
+                        invoice=item.invoice,
+                        invoice_item=item,
+                        amount=alloc_amount
+                    )
+                    
+                    # Update invoice's paid amount and balance
+                    inv = item.invoice
+                    inv.paid_amount += alloc_amount
+                    inv.balance = inv.total_amount - inv.paid_amount
+                    
+                    # Update status of invoice
+                    if inv.balance <= 0:
+                        inv.status = 'PAID'
+                    elif inv.paid_amount > 0:
+                        inv.status = 'PARTIALLY_PAID'
+                        
+                    inv.save(update_fields=['paid_amount', 'balance', 'status', 'updated_at'])
+                    
+                    total_allocated += alloc_amount
+                    remaining_to_allocate -= alloc_amount
+                    
+            # Update student receipt allocated amount
+            student_receipt.amount_allocated = total_allocated
+            
+            # Handle prepayments if any surplus exists
+            if amount > total_allocated:
+                surplus = amount - total_allocated
+                StudentPrepayment.objects.create(
+                    student=student,
+                    receipt=student_receipt,
+                    amount=surplus,
+                    balance=surplus
+                )
+                
+            student_receipt.save()
+            
+            # Create accounting journal entry for the student receipt
+            from finance.receipt_journal_service import ReceiptJournalService
+            try:
+                ReceiptJournalService.create_receipt_journal_entry(student_receipt, user=request.user)
+            except Exception as e:
+                raise DRFValidationError(f"Accounting ledger entry creation failed: {e}")
+            
+            # 4. Update Sponsor receipt allocated amount
+            sponsor_receipt.amount_allocated += amount
+            sponsor_receipt.save()
+            
+            return Response({
+                'success': True,
+                'message': f'Allocated {amount} to student {student.student.get_full_name if student.student else student.admission_number}',
+                'student_receipt_number': student_receipt.receipt_number,
+                'sponsor_unallocated_amount': float(sponsor_receipt.amount_received - sponsor_receipt.amount_allocated)
+            })
 
     @action(detail=True, methods=['post'])
     def print(self, request, pk=None):

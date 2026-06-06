@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/attendance/', include('attendance.urls')),
     path('api/portal/', include('portal.urls')),
     path('api/assignments/', include('assignments.urls')),
+    path('api/programmes/', include('programmes.urls')),
     path('workforce/', include('workforce.api_urls')),
     #path('api/auth/', rest_framework.urls)
 ]

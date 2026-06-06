@@ -361,3 +361,176 @@ class ArrearsViewSet(viewsets.ViewSet):
             'total_paid': agg['total_paid'],
             'balance': agg['balance']
         })
+
+    @action(detail=False, methods=['get'])
+    def ageing_analysis(self, request):
+        """
+        Returns outstanding invoice amounts bucketed by days since date_issued.
+        Buckets: 0-30, 31-60, 61-90, 90+ days.
+        Accepts the same filters as summary/.
+        """
+        from django.utils import timezone
+        today = timezone.now().date()
+
+        invoices = FeeInvoice.objects.filter(
+            balance__gt=0
+        ).exclude(status='VOID')
+
+        invoices = self._apply_filters(invoices, request)
+
+        buckets = {
+            '0_30': {'label': '0 – 30 days', 'amount': Decimal('0.00'), 'count': 0},
+            '31_60': {'label': '31 – 60 days', 'amount': Decimal('0.00'), 'count': 0},
+            '61_90': {'label': '61 – 90 days', 'amount': Decimal('0.00'), 'count': 0},
+            '90_plus': {'label': '90+ days', 'amount': Decimal('0.00'), 'count': 0},
+        }
+
+        for inv in invoices.values('date_issued', 'balance'):
+            if not inv['date_issued']:
+                continue
+            days = (today - inv['date_issued']).days
+            bal = inv['balance'] or Decimal('0.00')
+            if days <= 30:
+                buckets['0_30']['amount'] += bal
+                buckets['0_30']['count'] += 1
+            elif days <= 60:
+                buckets['31_60']['amount'] += bal
+                buckets['31_60']['count'] += 1
+            elif days <= 90:
+                buckets['61_90']['amount'] += bal
+                buckets['61_90']['count'] += 1
+            else:
+                buckets['90_plus']['amount'] += bal
+                buckets['90_plus']['count'] += 1
+
+        return Response([
+            {
+                'bucket': key,
+                'label': v['label'],
+                'amount': float(v['amount']),
+                'count': v['count'],
+            }
+            for key, v in buckets.items()
+        ])
+
+    @action(detail=False, methods=['get'])
+    def student_statement(self, request):
+        """
+        Returns a full fee statement for a single student including:
+        - Student profile info
+        - Term-by-term invoice history
+        - Payment receipts per invoice (via ReceiptAllocation)
+        - Prepayment/credit balance
+        Query Params:
+        - student_id: (required) Student PK
+        - year: academic year name filter (optional)
+        - term: term name filter (optional)
+        """
+        from finance.models import ReceiptAllocation, StudentPrepayment
+
+        student_id = request.query_params.get('student_id')
+        if not student_id:
+            return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            student = Student.objects.select_related('student').get(pk=student_id)
+        except Student.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Build invoice queryset
+        invoices_qs = FeeInvoice.objects.filter(
+            student=student
+        ).exclude(status='VOID').select_related(
+            'term', 'academic_year', 'class_session__grade'
+        ).prefetch_related(
+            'allocations__receipt__payment_method',
+            'allocations__invoice_item',
+        ).order_by('-academic_year__start_date', '-term__start_date', '-date_issued')
+
+        # Apply optional year/term filters
+        year_filter = request.query_params.get('year')
+        term_filter = request.query_params.get('term')
+        if year_filter:
+            invoices_qs = invoices_qs.filter(academic_year__name__icontains=year_filter)
+        if term_filter:
+            invoices_qs = invoices_qs.filter(term__name__icontains=term_filter)
+
+        from django.utils import timezone
+        today = timezone.now().date()
+
+        invoices_data = []
+        for inv in invoices_qs:
+            days_overdue = (today - inv.date_issued).days if inv.date_issued else 0
+
+            # Build payment history from allocations
+            payments = []
+            for alloc in inv.allocations.select_related('receipt__payment_method').all():
+                rcpt = alloc.receipt
+                payments.append({
+                    'receipt_number': rcpt.receipt_number,
+                    'date': rcpt.received_date.strftime('%Y-%m-%d') if rcpt.received_date else None,
+                    'amount': float(alloc.amount),
+                    'payment_method': rcpt.payment_method.name if rcpt.payment_method else 'Unknown',
+                    'reference': rcpt.reference or '',
+                    'payer_name': rcpt.payer_name or '',
+                    'status': rcpt.get_status_display(),
+                })
+
+            invoices_data.append({
+                'id': inv.id,
+                'invoice_number': inv.invoice_number,
+                'date_issued': inv.date_issued.strftime('%Y-%m-%d') if inv.date_issued else None,
+                'due_date': inv.due_date.strftime('%Y-%m-%d') if inv.due_date else None,
+                'term': inv.term.name if inv.term else '',
+                'academic_year': inv.academic_year.name if inv.academic_year else '',
+                'grade': inv.class_session.grade.name if inv.class_session and inv.class_session.grade else '',
+                'total_amount': float(inv.total_amount),
+                'paid_amount': float(inv.paid_amount),
+                'balance': float(inv.balance),
+                'status': inv.status,
+                'days_overdue': days_overdue,
+                'payments': payments,
+            })
+
+        # Prepayment credits
+        prepayments = StudentPrepayment.objects.filter(
+            student=student, is_fully_used=False
+        ).select_related('receipt').order_by('created_at')
+
+        prepayment_data = []
+        total_prepayment_credit = Decimal('0.00')
+        for prep in prepayments:
+            total_prepayment_credit += prep.balance
+            prepayment_data.append({
+                'receipt_number': prep.receipt.receipt_number if prep.receipt else '',
+                'date': prep.created_at.strftime('%Y-%m-%d') if prep.created_at else None,
+                'original_amount': float(prep.amount),
+                'remaining_balance': float(prep.balance),
+            })
+
+        # Aggregated totals
+        total_billed = sum(i['total_amount'] for i in invoices_data)
+        total_paid = sum(i['paid_amount'] for i in invoices_data)
+        total_balance = sum(i['balance'] for i in invoices_data)
+        net_balance = total_balance - float(total_prepayment_credit)
+
+        student_obj = student.student if hasattr(student, 'student') else None
+
+        return Response({
+            'student': {
+                'id': student.id,
+                'name': student_obj.get_full_name if student_obj else str(student),
+                'admission_number': student.admission_number,
+                'grade': invoices_data[0]['grade'] if invoices_data else '',
+            },
+            'summary': {
+                'total_billed': total_billed,
+                'total_paid': total_paid,
+                'total_balance': total_balance,
+                'prepayment_credit': float(total_prepayment_credit),
+                'net_balance': net_balance,
+                'invoice_count': len(invoices_data),
+            },
+            'invoices': invoices_data,
+            'prepayments': prepayment_data,
+        })

@@ -365,6 +365,61 @@ class FinanceSettings(models.Model):
         return obj
 
 
+# Sponsor Type and Sponsorship Models
+
+class SponsorType(models.Model):
+    """
+    Represents classifications of sponsors (e.g. Government Scholarships, NGO Scholarships, CDF Bursaries, County Bursaries)
+    Linked to a liability clearing account for double-entry bookkeeping.
+    """
+    name = models.CharField(max_length=100, unique=True)
+    clearing_account = models.ForeignKey(
+        'Account',
+        on_delete=models.RESTRICT,
+        limit_choices_to={'type': 'LIABILITY'},
+        related_name='sponsor_types',
+        help_text='Liability account used in clearing sponsorship receipts during allocations'
+    )
+    description = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Sponsor Type'
+        verbose_name_plural = 'Sponsor Types'
+
+    def __str__(self):
+        return self.name
+
+
+class Sponsorship(models.Model):
+    """
+    Represents specific sponsorship programs or sponsors (e.g., Equity Group Foundation Wings to Fly, Elimu Scholarship)
+    """
+    name = models.CharField(max_length=200, unique=True)
+    sponsor_type = models.ForeignKey(
+        SponsorType,
+        on_delete=models.PROTECT,
+        related_name='sponsorships',
+        help_text='The category of this sponsor'
+    )
+    code = models.CharField(max_length=50, blank=True, null=True, help_text='Unique identifier or code for the sponsor')
+    contact_person = models.CharField(max_length=100, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Sponsorship'
+        verbose_name_plural = 'Sponsorships'
+
+    def __str__(self):
+        return f"{self.name} ({self.sponsor_type.name})"
+
+
 # Receipt Models - Payment and Allocation Tracking
 
 class Receipt(models.Model):
@@ -404,6 +459,22 @@ class Receipt(models.Model):
         on_delete=models.PROTECT,
         related_name='receipts',
         help_text='Required for STUDENT_FEE and STUDENT_NON_FEE types'
+    )
+    sponsorship = models.ForeignKey(
+        Sponsorship,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='receipts',
+        help_text='Required for SPONSOR receipt type'
+    )
+    parent_receipt = models.ForeignKey(
+        'self',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='child_allocations',
+        help_text='Sponsor receipt that this student payment was allocated from'
     )
     payment_method = models.ForeignKey(
         'PaymentMethod',
@@ -552,6 +623,12 @@ class Receipt(models.Model):
             raise ValidationError({
                 'student': _('Student is required for student fee/non-fee receipts.')
             })
+            
+        # Validate sponsorship is provided for sponsor receipts
+        if self.receipt_type == 'SPONSOR' and not self.sponsorship:
+            raise ValidationError({
+                'sponsorship': _('Sponsorship is required for Sponsor receipts.')
+            })
         
         # Prevent editing after posting
         if self.pk and self.is_posted:
@@ -566,6 +643,10 @@ class Receipt(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         
+        # Sync sponsorship type text field if sponsorship is set
+        if self.sponsorship:
+            self.sponsorship_type = self.sponsorship.sponsor_type.name
+            
         # Generate receipt number if new
         if not self.receipt_number:
             # Temporary inline generation until service layer is created

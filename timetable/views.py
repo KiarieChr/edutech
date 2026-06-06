@@ -656,3 +656,230 @@ class RoomTimetableView(APIView):
         analytics = TimetableAnalytics()
         return Response(analytics.get_room_schedule(room_id))
 
+
+class GenerateForTermView(APIView):
+    """
+    Generate timetable slots for multiple classes in a term.
+    
+    POST /api/timetable/generate-for-term/
+    {
+        "term_id": 3,
+        "class_sessions": [1, 2, 3],  // Optional
+        "mode": "semi_auto",
+        "effective_from": "2026-09-01"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from academics.models import ClassSession, Term
+        from .services.scheduling_service import SchedulingService, SchedulingMode, SchedulingPreferences
+        from datetime import datetime
+        
+        term_id = request.data.get('term_id')
+        if not term_id:
+            return Response({'error': 'term_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        class_session_ids = request.data.get('class_sessions')
+        if class_session_ids:
+            class_sessions = ClassSession.objects.filter(pk__in=class_session_ids, is_active=True)
+        else:
+            class_sessions = ClassSession.objects.filter(term_id=term_id, is_active=True)
+
+        mode_str = request.data.get('mode', 'semi_auto')
+        try:
+            mode = SchedulingMode(mode_str)
+        except ValueError:
+            mode = SchedulingMode.SEMI_AUTO
+
+        effective_from_str = request.data.get('effective_from')
+        effective_from = None
+        if effective_from_str:
+            try:
+                effective_from = datetime.strptime(effective_from_str, '%Y-%m-%d').date()
+            except ValueError:
+                pass
+
+        service = SchedulingService()
+        preferences = SchedulingPreferences(
+            prefer_morning=True,
+            spread_subjects=True,
+            max_same_subject_per_day=1,
+        )
+
+        results = []
+        total_placed = 0
+        total_allocations = 0
+
+        for cs in class_sessions:
+            res = service.generate_timetable(
+                class_session=cs,
+                mode=mode,
+                preferences=preferences,
+                effective_from=effective_from
+            )
+            res_dict = res.to_dict()
+            total_placed += res_dict.get('placed_count', 0)
+            total_allocations += res_dict.get('total_allocations', 0)
+            
+            results.append({
+                'class_session_id': cs.id,
+                'class_session_name': cs.name,
+                'result': res_dict
+            })
+
+        return Response({
+            'status': 'success',
+            'summary': {
+                'total_placed': total_placed,
+                'total_allocations': total_allocations,
+                'percentage': round(total_placed / total_allocations * 100 if total_allocations > 0 else 0, 1)
+            },
+            'class_results': results
+        })
+
+
+class MonthlyTimetableView(APIView):
+    """
+    Get timetable mapped to actual dates for a specific month.
+    
+    GET /api/timetable/monthly-view/?year=2026&month=6&class_session=5
+    GET /api/timetable/monthly-view/?year=2026&month=6&teacher=12
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from datetime import date, timedelta
+        import calendar
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        class_session_id = request.query_params.get('class_session')
+        teacher_id = request.query_params.get('teacher')
+
+        if not year or not month:
+            return Response({'error': 'year and month are required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response({'error': 'invalid year or month'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Build slots query
+        queryset = TimetableSlot.objects.filter(is_active=True).select_related('subject', 'teacher', 'room', 'class_session')
+        if class_session_id:
+            queryset = queryset.filter(class_session_id=class_session_id)
+        elif teacher_id:
+            queryset = queryset.filter(teacher_id=teacher_id)
+        else:
+            return Response({'error': 'Either class_session or teacher is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get all slots grouped by day of week
+        slots = list(queryset)
+        slots_by_dow = {i: [] for i in range(7)}
+        for slot in slots:
+            slots_by_dow[slot.day_of_week].append(slot)
+
+        # Fetch exceptions for the month
+        start_date = date(year, month, 1)
+        _, last_day = calendar.monthrange(year, month)
+        end_date = date(year, month, last_day)
+
+        exceptions = TimetableException.objects.filter(
+            Q(date_from__lte=end_date) & Q(date_to__gte=start_date)
+        )
+        
+        # Build exception map for fast lookup
+        exception_dates = {}
+        for ex in exceptions:
+            current = ex.date_from
+            while current <= ex.date_to:
+                # Check applicability
+                applies = False
+                if ex.affects_all_classes:
+                    applies = True
+                elif class_session_id and ex.class_sessions.filter(id=class_session_id).exists():
+                    applies = True
+                
+                if applies:
+                    exception_dates[current] = {
+                        'reason': ex.reason,
+                        'type': ex.exception_type
+                    }
+                current += timedelta(days=1)
+
+        # Generate calendar
+        monthly_schedule = {}
+        for day in range(1, last_day + 1):
+            current_date = date(year, month, day)
+            date_str = current_date.isoformat()
+            dow = current_date.weekday() # 0 = Monday, 6 = Sunday
+            
+            # Map Python DOW to Model DOW if needed. They match: 0=Mon, 5=Sat.
+            if dow > 5: # Sunday
+                monthly_schedule[date_str] = {'slots': [], 'exception': None}
+                continue
+
+            exception = exception_dates.get(current_date)
+            
+            day_slots = []
+            if not exception:
+                for slot in slots_by_dow.get(dow, []):
+                    # Check effective dates
+                    if slot.effective_from and slot.effective_from > current_date:
+                        continue
+                    if slot.effective_until and slot.effective_until < current_date:
+                        continue
+                        
+                    day_slots.append({
+                        'id': slot.id,
+                        'subject_name': slot.subject.name,
+                        'subject_color': slot.subject.color_hex,
+                        'teacher_name': slot.teacher.get_full_name() or slot.teacher.username,
+                        'class_session_name': slot.class_session.name,
+                        'room_name': slot.room.name if slot.room else None,
+                        'start_time': slot.start_time.strftime('%H:%M'),
+                        'end_time': slot.end_time.strftime('%H:%M'),
+                    })
+                
+                # Sort slots by time
+                day_slots.sort(key=lambda s: s['start_time'])
+
+            monthly_schedule[date_str] = {
+                'slots': day_slots,
+                'exception': exception
+            }
+
+        export = request.query_params.get('export')
+        if export in ['pdf', 'excel']:
+            from academics.models import ClassSession
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            
+            entity_name = "Timetable"
+            if class_session_id:
+                try:
+                    cs = ClassSession.objects.get(pk=class_session_id)
+                    entity_name = f"Class {cs.name}"
+                except:
+                    pass
+            elif teacher_id:
+                try:
+                    t = User.objects.get(pk=teacher_id)
+                    entity_name = f"Teacher {t.get_full_name() or t.username}"
+                except:
+                    pass
+                    
+            if export == 'pdf':
+                from .reports_pdf import MonthlyTimetablePDFGenerator
+                return MonthlyTimetablePDFGenerator().generate(year, month, monthly_schedule, entity_name)
+            elif export == 'excel':
+                from .reports_excel import MonthlyTimetableExcelGenerator
+                return MonthlyTimetableExcelGenerator().generate(year, month, monthly_schedule, entity_name)
+
+        return Response({
+            'year': year,
+            'month': month,
+            'days': monthly_schedule
+        })

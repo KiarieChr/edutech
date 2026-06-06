@@ -5,12 +5,14 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from .models import (
     AcademicYear, Term, Curriculum, GradeStructure, Stream,
-    AdmissionConfig, StudentStatus, PromotionRule, DemographicConfig, SchoolCalendar, Intake,
+    AdmissionConfig, AdmissionWorkflowConfig, StudentStatus,
+    PromotionRule, DemographicConfig, SchoolCalendar, Intake,
     CurriculumLevel, LearningArea
 )
 from .serializers import (
     AcademicYearSerializer, TermSerializer, CurriculumSerializer,
-    GradeStructureSerializer, StreamSerializer, AdmissionConfigSerializer,
+    GradeStructureSerializer, StreamSerializer,
+    AdmissionConfigSerializer, AdmissionWorkflowConfigSerializer,
     StudentStatusSerializer, PromotionRuleSerializer, DemographicConfigSerializer,
     SchoolCalendarSerializer, IntakeSerializer, IntakeCreateSerializer,
     CurriculumLevelSerializer, LearningAreaSerializer
@@ -408,6 +410,38 @@ class AdmissionConfigViewSet(viewsets.ModelViewSet):
         obj, created = AdmissionConfig.objects.get_or_create(id=1)
         serializer = self.get_serializer(obj)
         return Response(serializer.data)
+
+
+class AdmissionWorkflowConfigViewSet(viewsets.ModelViewSet):
+    """
+    Singleton viewset for AdmissionWorkflowConfig.
+    GET  /api/settings/admission-workflow/   → returns current config
+    PATCH /api/settings/admission-workflow/1/ → partial update
+    """
+    queryset = AdmissionWorkflowConfig.objects.all()
+    serializer_class = AdmissionWorkflowConfigSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        obj = AdmissionWorkflowConfig.get_instance()
+        return Response(self.get_serializer(obj).data)
+
+    def update(self, request, *args, **kwargs):
+        kwargs['partial'] = True  # always allow partial updates
+        obj = AdmissionWorkflowConfig.get_instance()
+        serializer = self.get_serializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(updated_by=request.user)
+        return Response(serializer.data)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get'])
+    def stages(self, request):
+        """Return the list of currently active stages in order."""
+        obj = AdmissionWorkflowConfig.get_instance()
+        return Response({'active_stages': obj.active_stages})
 
 class StudentStatusViewSet(SoftDeleteViewSet):
     queryset = StudentStatus.objects.all()

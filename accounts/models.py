@@ -138,6 +138,7 @@ class User(AbstractUser):
         upload_to="profile_pictures/%y/%m/%d/", default="default.png", null=True
     )
     email = models.EmailField(blank=True, null=True)
+    session_timeout = models.IntegerField(default=30, help_text=_("Inactivity timeout in minutes for current session"))
     activated_on = models.DateTimeField(blank=True, null=True)
     is_first_login = models.BooleanField(
         default=True,

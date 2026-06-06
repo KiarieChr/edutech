@@ -57,16 +57,56 @@ class TemplateBillingService:
 
         grade = enrollment.grade
 
-        # Priority 1: direct grade match
-        template = FeeTemplate.objects.filter(
-            status='ACTIVE',
-            term=term,
-            academic_year=academic_year,
-            grades=grade,
-        ).first()
+        # Priority 1: Cohort-locked template (if student has intake cohort)
+        template = None
+        if enrollment.intake:
+            template = FeeTemplate.objects.filter(
+                status='ACTIVE',
+                term=term,
+                academic_year=academic_year,
+                cohort=enrollment.intake,
+                grades=grade,
+            ).first()
+            
+            if not template:
+                template = FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    cohort=enrollment.intake,
+                    grade_band__grades=grade,
+                ).first()
 
+        # Priority 2: Generic direct grade match
         if not template:
-            # Priority 2: via grade_band
+            template = FeeTemplate.objects.filter(
+                status='ACTIVE',
+                term=term,
+                academic_year=academic_year,
+                cohort__isnull=True,
+                grades=grade,
+            ).first()
+
+        # Priority 3: Generic grade band match
+        if not template:
+            template = FeeTemplate.objects.filter(
+                status='ACTIVE',
+                term=term,
+                academic_year=academic_year,
+                cohort__isnull=True,
+                grade_band__grades=grade,
+            ).first()
+            
+        # Priority 4: Fallback to any active matching template
+        if not template:
+            template = FeeTemplate.objects.filter(
+                status='ACTIVE',
+                term=term,
+                academic_year=academic_year,
+                grades=grade,
+            ).first()
+            
+        if not template:
             template = FeeTemplate.objects.filter(
                 status='ACTIVE',
                 term=term,
@@ -327,20 +367,43 @@ class TemplateBillingService:
             total_amount=0,
         )
 
+        # Determine credits if any line item is credit-hour based
+        total_credits = 0
+        has_credit_hour_item = any(getattr(line, 'is_credit_hour', False) for line in lines)
+        if has_credit_hour_item:
+            # Query all active sessions for this student in this term/year that are linked to a course
+            course_enrollments = StudentSessionEnrollment.objects.filter(
+                student=student,
+                session__academic_year=template.academic_year,
+                session__term=template.term,
+                session__course__isnull=False,
+            )
+            for ce in course_enrollments:
+                if ce.session.course and ce.session.course.credit:
+                    total_credits += ce.session.course.credit
+
         total_amount = Decimal('0.00')
         invoice_lines = []
 
         for line in lines:
+            line_amount = line.amount
+            description = line.vote_head.name
+            
+            # Credit-hour billing calculation
+            if getattr(line, 'is_credit_hour', False):
+                line_amount = line.amount * Decimal(str(total_credits))
+                description = f"{line.vote_head.name} - Credit Hour Tuition ({total_credits} Credits @ {line.amount})"
+
             inv_item = FeeInvoiceItem.objects.create(
                 invoice=invoice,
                 fee_item=None,  # No legacy FeeItem
                 vote_head=line.vote_head,
-                description=line.vote_head.name,
-                amount=line.amount,
+                description=description,
+                amount=line_amount,
                 is_optional=line.is_optional,
             )
             invoice_lines.append(inv_item)
-            total_amount += line.amount
+            total_amount += line_amount
 
         invoice.total_amount = total_amount
         invoice.balance = total_amount

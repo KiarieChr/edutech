@@ -29,7 +29,7 @@ class AccountSubTypeOptionSerializer(serializers.Serializer):
     value = serializers.CharField()
     label = serializers.CharField()
 
-from .models import Tax, FinanceSettings, FiscalPeriod, Cashbook, PaymentMethod
+from .models import Tax, FinanceSettings, FiscalPeriod, Cashbook, PaymentMethod, SponsorType, Sponsorship
 
 class TaxSerializer(serializers.ModelSerializer):
     class Meta:
@@ -67,3 +67,24 @@ class FinanceSettingsSerializer(serializers.ModelSerializer):
         if not created:
             return super().update(instance, validated_data)
         return instance
+
+class SponsorTypeSerializer(serializers.ModelSerializer):
+    clearing_account_name = serializers.CharField(source='clearing_account.name', read_only=True)
+    clearing_account_code = serializers.CharField(source='clearing_account.code', read_only=True)
+
+    class Meta:
+        model = SponsorType
+        fields = ['id', 'name', 'clearing_account', 'clearing_account_name', 'clearing_account_code', 'description', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+class SponsorshipSerializer(serializers.ModelSerializer):
+    sponsor_type_name = serializers.CharField(source='sponsor_type.name', read_only=True)
+
+    class Meta:
+        model = Sponsorship
+        fields = [
+            'id', 'name', 'sponsor_type', 'sponsor_type_name', 'code', 
+            'contact_person', 'email', 'phone', 'address', 'is_active', 
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']

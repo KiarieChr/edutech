@@ -198,6 +198,14 @@ def fee_insights(request):
                 total_overdue=Sum('balance')
             )
             
+            top_suppliers = SupplierInvoice.objects.filter(
+                status__in=['PENDING', 'PARTIALLY_PAID']
+            ).values(
+                'supplier__name'
+            ).annotate(
+                total_due=Sum('balance')
+            ).order_by('-total_due')[:4]
+            
             insights["payables"] = {
                 "due_within_7_days": {
                     "count": due_supplier_invoices['count'] or 0,
@@ -206,12 +214,20 @@ def fee_insights(request):
                 "overdue": {
                     "count": overdue_supplier_invoices['count'] or 0,
                     "total": float(overdue_supplier_invoices['total_overdue'] or 0)
-                }
+                },
+                "top_suppliers": [
+                    {
+                        "name": s['supplier__name'],
+                        "amount": float(s['total_due'] or 0),
+                        "color": ['blue', 'indigo', 'amber', 'emerald'][i % 4]
+                    } for i, s in enumerate(top_suppliers)
+                ]
             }
         except ImportError:
             insights["payables"] = {
                 "due_within_7_days": {"count": 0, "total": 0},
-                "overdue": {"count": 0, "total": 0}
+                "overdue": {"count": 0, "total": 0},
+                "top_suppliers": []
             }
         
         # 5. ATTENDANCE INSIGHTS (if attendance tracking exists)

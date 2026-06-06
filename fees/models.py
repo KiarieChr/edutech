@@ -475,6 +475,13 @@ class FeeTemplate(models.Model):
         related_name='fee_templates',
         help_text="Apply to all grades in this band."
     )
+    cohort = models.ForeignKey(
+        'student_settings.Intake',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='fee_templates',
+        help_text="Link this fee template to a specific cohort intake for locked entry pricing"
+    )
     grades = models.ManyToManyField(
         'student_settings.GradeStructure',
         blank=True,
@@ -591,6 +598,7 @@ class FeeTemplate(models.Model):
         new_template = FeeTemplate.objects.create(
             name=f"{self.name}",
             grade_band=self.grade_band,
+            cohort=self.cohort,
             curriculum=self.curriculum,
             term=target_term,
             academic_year=target_year,
@@ -610,6 +618,7 @@ class FeeTemplate(models.Model):
                 amount=line.amount * factor,
                 override_account=line.override_account,
                 is_mandatory=line.is_mandatory,
+                is_credit_hour=line.is_credit_hour,
                 priority=line.priority,
             )
         
@@ -653,6 +662,10 @@ class TemplateLineItem(models.Model):
     is_mandatory = models.BooleanField(
         default=True,
         help_text="If False, this is an optional item students can opt out of."
+    )
+    is_credit_hour = models.BooleanField(
+        default=False,
+        help_text="If True, this line item fee is multiplied by the student's total course credits instead of being billed as a flat rate"
     )
     applies_to = models.CharField(
         max_length=20,

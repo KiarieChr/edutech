@@ -75,6 +75,11 @@ class Intake(BaseModel):
     start_date = models.DateField(
         help_text='When this intake cohort started'
     )
+    expected_graduation_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Expected graduation date for this cohort'
+    )
     
     # Entry Configuration
     entry_curriculum = models.ForeignKey(
@@ -141,6 +146,50 @@ class Intake(BaseModel):
     def year_name(self):
         """Get academic year name"""
         return self.academic_year.name if self.academic_year else None
+
+    @property
+    def current_expected_stage(self):
+        """
+        Dynamically calculates the expected stage/grade and term/semester 
+        for this cohort based on the current date and curriculum structure.
+        """
+        if not self.start_date:
+            return "N/A"
+            
+        today = timezone.now().date()
+        if today < self.start_date:
+            return "Scheduled"
+            
+        if self.expected_graduation_date and today > self.expected_graduation_date:
+            return "Completed / Graduated"
+            
+        # Determine expected grade level based on years elapsed
+        elapsed_years = today.year - self.start_date.year
+        
+        # Start from entry grade if defined, otherwise the first grade in curriculum
+        grades = []
+        if self.entry_curriculum:
+            grades = list(self.entry_curriculum.grades.all().order_by('level_order'))
+            
+        if not grades:
+            return "Active"
+            
+        start_idx = 0
+        if self.entry_grade and self.entry_grade in grades:
+            try:
+                start_idx = grades.index(self.entry_grade)
+            except ValueError:
+                start_idx = 0
+            
+        expected_grade_idx = min(start_idx + elapsed_years, len(grades) - 1)
+        expected_grade = grades[expected_grade_idx]
+        
+        # Get active term/semester if any
+        current_term = Term.objects.filter(is_current=True).first()
+        if current_term:
+            return f"{expected_grade.name} ({current_term.name})"
+            
+        return expected_grade.name
 
 
 class Term(BaseModel):
@@ -249,6 +298,10 @@ class GradeStructure(BaseModel):
     code = models.CharField(max_length=20, blank=True, null=True)
     level_order = models.PositiveIntegerField()
     age_range = models.CharField(max_length=50, blank=True, null=True)
+    credits_required = models.PositiveIntegerField(
+        default=0,
+        help_text='Total course credits required to complete this stage (for higher education)'
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -322,7 +375,106 @@ class AdmissionConfig(BaseModel):
     def __str__(self):
         return "Global Admission Settings"
 
+class AdmissionWorkflowConfig(BaseModel):
+    """
+    Singleton — controls which stages are active in the school's admission pipeline.
+    Read alongside AdmissionConfig. All stages default to OFF so existing schools
+    are unaffected. Set require_application=True on AdmissionConfig to enforce the
+    Application stage; use this model for the surrounding workflow stages.
+    """
+
+    # ── Stage Toggles ──────────────────────────────────────────────────────────
+    require_enquiry = models.BooleanField(
+        default=False,
+        help_text='If True, an Enquiry record must exist and be converted before an Application can be created.'
+    )
+    require_application_fee = models.BooleanField(
+        default=False,
+        help_text='If True, a registration/application fee must be paid (or waived) before the application can proceed.'
+    )
+    require_interview = models.BooleanField(
+        default=False,
+        help_text='If True, an Interview must be scheduled and passed before admission.'
+    )
+    require_reporting = models.BooleanField(
+        default=False,
+        help_text='If True, a Reporting record (student physically arrives with documents) must be marked before formal admission.'
+    )
+
+    # ── Application Fee Settings ────────────────────────────────────────────────
+    application_fee_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Amount charged as the application/registration fee.'
+    )
+    application_fee_label = models.CharField(
+        max_length=100, default='Application Registration Fee',
+        help_text='Label shown on receipts and the frontend.'
+    )
+    application_fee_currency = models.CharField(
+        max_length=10, default='KES', blank=True,
+        help_text='Currency code, e.g. KES, USD.'
+    )
+
+    # ── Interview Settings ──────────────────────────────────────────────────────
+    interview_label = models.CharField(
+        max_length=100, default='Interview',
+        help_text='Label shown in the UI, e.g. "Entrance Interview", "Assessment Day".'
+    )
+    allow_self_schedule = models.BooleanField(
+        default=False,
+        help_text='If True, applicants can pick their own interview slot from available slots.'
+    )
+
+    # ── Reporting / Document Submission Settings ────────────────────────────────
+    reporting_label = models.CharField(
+        max_length=100, default='Reporting & Document Submission',
+        help_text='Label shown in the UI for the reporting stage.'
+    )
+    document_checklist = models.JSONField(
+        default=list, blank=True,
+        help_text=(
+            'List of required documents as strings, e.g. '
+            '["Birth Certificate", "Passport Photo", "Previous Report Card"]. '
+            'Displayed as a checklist on the reporting form.'
+        )
+    )
+
+    class Meta:
+        db_table = 'admission_workflow_configs'
+        verbose_name = 'Admission Workflow Configuration'
+
+    def __str__(self):
+        return 'Admission Workflow Configuration'
+
+    def save(self, *args, **kwargs):
+        # Enforce singleton — always use pk=1
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_instance(cls):
+        """Return the singleton, creating defaults if needed."""
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @property
+    def active_stages(self):
+        """Returns an ordered list of the stages that are currently enabled."""
+        stages = ['application']  # always present
+        if self.require_enquiry:
+            stages.insert(0, 'enquiry')
+        if self.require_application_fee:
+            stages.append('fee_payment')
+        if self.require_interview:
+            stages.append('interview')
+        if self.require_reporting:
+            stages.append('reporting')
+        stages.append('admission')
+        return stages
+
+
 class StudentStatus(BaseModel):
+
     name = models.CharField(max_length=50, unique=True)  # Active, Alumni, Transferred
     is_active_state = models.BooleanField(default=True)  # Does this status allow class assignment?
     is_enabled = models.BooleanField(default=True)

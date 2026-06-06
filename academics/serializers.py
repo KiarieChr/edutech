@@ -7,6 +7,7 @@ class ClassSessionSerializer(serializers.ModelSerializer):
     academic_year_name = serializers.CharField(source='academic_year.name', read_only=True)
     curriculum_name = serializers.CharField(source='curriculum.name', read_only=True)
     curriculum_level_name = serializers.CharField(source='curriculum_level.name', read_only=True, allow_null=True)
+    grade_level_order = serializers.IntegerField(source='grade.level_order', read_only=True, allow_null=True)
     enrollment_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
@@ -14,6 +15,7 @@ class ClassSessionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 
             'grade', 'grade_name',
+            'grade_level_order',
             'term', 'term_name',
             'academic_year', 'academic_year_name',
             'curriculum', 'curriculum_name',

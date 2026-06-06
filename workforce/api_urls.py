@@ -25,6 +25,7 @@ router.register(r'biometric-devices', BiometricDeviceViewSet, basename='biometri
 router.register(r'overtime-requests', OvertimeRequestViewSet, basename='overtime-request')
 
 # Leave
+router.register(r'leave-types', LeaveTypeViewSet, basename='leave-type')
 router.register(r'leave-applications', LeaveApplicationViewSet, basename='leave-application')
 router.register(r'leave-balances', EmployeeLeaveBalanceViewSet, basename='leave-balance')
 
@@ -57,6 +58,12 @@ router.register(r'org-chart', OrgChartViewSet, basename='org-chart')
 router.register(r'hr-analytics', HRAnalyticsViewSet, basename='hr-analytics')
 router.register(r'payroll-dashboard', PayrollDashboardViewSet, basename='payroll-dashboard')
 router.register(r'payroll-settings', PayrollSettingsViewSet, basename='payroll-settings')
+
+# Performance
+router.register(r'performance-metrics', PerformanceMetricViewSet, basename='performance-metric')
+router.register(r'appraisal-cycles', AppraisalCycleViewSet, basename='appraisal-cycle')
+router.register(r'employee-appraisals', EmployeeAppraisalViewSet, basename='employee-appraisal')
+router.register(r'performance-goals', EmployeePerformanceGoalViewSet, basename='performance-goal')
 
 
 urlpatterns = [

@@ -22,7 +22,15 @@ class ClassSession(models.Model):
     grade = models.ForeignKey(
         'student_settings.GradeStructure', 
         on_delete=models.PROTECT,
-        related_name='academic_sessions' 
+        related_name='academic_sessions',
+        null=True, blank=True
+    )
+    course = models.ForeignKey(
+        'course.Course',
+        on_delete=models.PROTECT,
+        related_name='academic_sessions',
+        null=True, blank=True,
+        help_text="The university/modular course section for this session"
     )
     term = models.ForeignKey(
         'student_settings.Term', 
@@ -69,6 +77,8 @@ class ClassSession(models.Model):
 
     def update_status(self):
         """Update status based on current date"""
+        if self.status in ('closed', 'archived'):
+            return
         if not self.start_date or not self.end_date:
             return
 
@@ -89,10 +99,14 @@ class ClassSession(models.Model):
         # Auto-generate name
         if not self.name:
             curr_str = self.curriculum.code if self.curriculum.code else self.curriculum.name
-            self.name = f"{self.grade.name} ({curr_str}) - {self.term.name} {self.academic_year.name}"
+            if self.course:
+                self.name = f"{self.course.code} ({curr_str}) - {self.term.name} {self.academic_year.name}"
+            else:
+                grade_name = self.grade.name if self.grade else "Unknown Grade"
+                self.name = f"{grade_name} ({curr_str}) - {self.term.name} {self.academic_year.name}"
         
         # Enforce Curriculum Consistency
-        if self.grade.curriculum != self.curriculum:
+        if self.grade and self.grade.curriculum != self.curriculum:
             raise ValidationError(f"Grade {self.grade} does not belong to Curriculum {self.curriculum}")
 
         # Auto-update status based on dates

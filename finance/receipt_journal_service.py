@@ -155,35 +155,38 @@ class ReceiptJournalService:
             total_credit = receipt.amount_received
         
         elif receipt.receipt_type == 'SPONSOR':
-            # Similar to general, but might have different handling
-            if not receipt.income_account:
-                # Default to a sponsor income account
-                from finance.models import Account
-                sponsor_account, created = Account.objects.get_or_create(
-                    code='4100-20',
-                    defaults={
-                        'name': 'Sponsorship Income',
-                        'type': 'INCOME',
-                        'is_student_related': True,
-                        'description': 'Income from sponsors and donations'
-                    }
+            # Credit the clearing account of the sponsor type
+            if not receipt.sponsorship:
+                raise ValidationError("Sponsor receipt must be linked to a sponsorship program.")
+                
+            clearing_account = receipt.sponsorship.sponsor_type.clearing_account
+            if not clearing_account:
+                raise ValidationError(
+                    f"Clearing account not configured for sponsor type '{receipt.sponsorship.sponsor_type.name}'."
                 )
-                revenue_account = sponsor_account
-            else:
-                revenue_account = receipt.income_account
             
             lines_data.append({
-                'account': revenue_account,
-                'description': f"Sponsorship from {receipt.payer_name}",
+                'account': clearing_account,
+                'description': f"Sponsorship fund receipt - {receipt.sponsorship.name} ({receipt.sponsorship.sponsor_type.name})",
                 'debit': Decimal('0.00'),
                 'credit': receipt.amount_received,
             })
             total_credit = receipt.amount_received
         
-        # Add debit line for cash/bank
+        # Add debit line: either cash/bank, or the clearing account if allocated from a sponsor receipt
+        if receipt.parent_receipt:
+            if not receipt.parent_receipt.sponsorship:
+                raise ValidationError("Parent sponsor receipt is not linked to a sponsorship program.")
+            
+            debit_account = receipt.parent_receipt.sponsorship.sponsor_type.clearing_account
+            debit_desc = f"Allocation from Sponsor Receipt {receipt.parent_receipt.receipt_number}"
+        else:
+            debit_account = cash_account
+            debit_desc = f"Receipt via {receipt.payment_method.name}"
+            
         lines_data.insert(0, {
-            'account': cash_account,
-            'description': f"Receipt via {receipt.payment_method.name}",
+            'account': debit_account,
+            'description': debit_desc,
             'debit': receipt.amount_received,
             'credit': Decimal('0.00'),
         })

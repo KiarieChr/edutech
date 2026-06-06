@@ -36,7 +36,12 @@ class UserTokenAuthentication(BaseAuthentication):
 
     def _authenticate_credentials(self, request, key):
         from .models import UserToken
-
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        token = None
+        is_legacy = False
+        
         try:
             token = UserToken.objects.select_related('user').get(key=key)
         except UserToken.DoesNotExist:
@@ -46,15 +51,30 @@ class UserTokenAuthentication(BaseAuthentication):
                 drf_token = DRFToken.objects.select_related('user').get(key=key)
                 if not drf_token.user.is_active:
                     raise AuthenticationFailed('User inactive or deleted.')
-                return (drf_token.user, drf_token)
+                
+                # Auto-convert legacy DRFToken to UserToken so it tracks correctly
+                token = UserToken.create_for_user(drf_token.user, request)
+                token.key = drf_token.key # Keep the same key so client doesn't log out
+                token.save()
+                is_legacy = True
             except DRFToken.DoesNotExist:
                 raise AuthenticationFailed('Invalid token.')
 
         if not token.user.is_active:
             raise AuthenticationFailed('User inactive or deleted.')
 
+        # Enforce inactivity timeout
+        now = timezone.now()
+        timeout_minutes = getattr(token.user, 'session_timeout', 30)
+        
+        # If not legacy (legacy tokens just got created, so they pass), check timeout
+        if not is_legacy:
+            if now - token.last_used > timedelta(minutes=timeout_minutes):
+                token.delete()
+                raise AuthenticationFailed('Session expired due to inactivity.')
+
         # Update last_used timestamp (cheap non-blocking update)
-        UserToken.objects.filter(pk=token.pk).update(last_used=timezone.now())
+        UserToken.objects.filter(pk=token.pk).update(last_used=now)
 
         return (token.user, token)
 

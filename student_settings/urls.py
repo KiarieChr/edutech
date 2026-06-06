@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AcademicYearViewSet, TermViewSet, CurriculumViewSet,
     GradeStructureViewSet, StreamViewSet, AdmissionConfigViewSet,
+    AdmissionWorkflowConfigViewSet,
     StudentStatusViewSet, PromotionRuleViewSet, DemographicConfigViewSet,
     SchoolCalendarViewSet, EnrollmentViewSet, IntakeViewSet,
     CurriculumLevelViewSet, LearningAreaViewSet
@@ -18,6 +19,7 @@ router.register(r'learning-areas', LearningAreaViewSet)
 router.register(r'classes', GradeStructureViewSet)
 router.register(r'streams', StreamViewSet)
 router.register(r'admission-config', AdmissionConfigViewSet)
+router.register(r'admission-workflow', AdmissionWorkflowConfigViewSet)
 router.register(r'student-statuses', StudentStatusViewSet)
 router.register(r'promotion-rules', PromotionRuleViewSet)
 router.register(r'demographic-config', DemographicConfigViewSet)

@@ -9,6 +9,7 @@ from .views import (
     # API views
     ConflictCheckView, SchedulingView, AnalyticsView,
     ClassTimetableView, TeacherTimetableView, RoomTimetableView,
+    GenerateForTermView, MonthlyTimetableView,
 )
 
 router = DefaultRouter()
@@ -40,4 +41,8 @@ urlpatterns = [
     path('class/<int:class_id>/full/', ClassTimetableView.as_view(), name='class-timetable'),
     path('teacher/<int:teacher_id>/full/', TeacherTimetableView.as_view(), name='teacher-timetable'),
     path('room/<int:room_id>/full/', RoomTimetableView.as_view(), name='room-timetable'),
+    
+    # Batch scheduling & Calendar views
+    path('generate-for-term/', GenerateForTermView.as_view(), name='generate-for-term'),
+    path('monthly-view/', MonthlyTimetableView.as_view(), name='monthly-view'),
 ]

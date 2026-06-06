@@ -2541,6 +2541,49 @@ class AppraisalMetricScore(AuditedModel):
         return f"{self.appraisal.employee.employee_no} - {self.metric.name}"
 
 
+class EmployeePerformanceGoal(AuditedModel):
+    """Individual performance goals and objectives for an employee"""
+    class GoalStatus(models.TextChoices):
+        NOT_STARTED = 'not_started', _('Not Started')
+        IN_PROGRESS = 'in_progress', _('In Progress')
+        COMPLETED = 'completed', _('Completed')
+        ON_HOLD = 'on_hold', _('On Hold')
+        CANCELLED = 'cancelled', _('Cancelled')
+
+    employee = models.ForeignKey(
+        Employee, 
+        on_delete=models.CASCADE,
+        related_name='performance_goals'
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=100, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=GoalStatus.choices,
+        default=GoalStatus.NOT_STARTED
+    )
+    progress_percentage = models.PositiveIntegerField(default=0)
+    start_date = models.DateField()
+    target_completion_date = models.DateField()
+    actual_completion_date = models.DateField(null=True, blank=True)
+    
+    appraisal_cycle = models.ForeignKey(
+        AppraisalCycle, 
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_goals'
+    )
+
+    class Meta:
+        db_table = 'hr_employee_performance_goal'
+        ordering = ['-target_completion_date']
+
+    def __str__(self):
+        return f"{self.employee.employee_no} - {self.title}"
+
+
 class AcademicProductivity(AuditedModel):
     """Academic productivity tracking for teaching staff"""
     employee = models.ForeignKey(

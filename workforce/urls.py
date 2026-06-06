@@ -18,6 +18,7 @@ router.register(r'attendance', AttendanceRecordViewSet, basename='attendance')
 router.register(r'overtime-requests', OvertimeRequestViewSet, basename='overtime-request')
 
 # Leave
+router.register(r'leave-types', LeaveTypeViewSet, basename='leave-type')
 router.register(r'leave-applications', LeaveApplicationViewSet, basename='leave-application')
 router.register(r'leave-balances', EmployeeLeaveBalanceViewSet, basename='leave-balance')
 
@@ -148,8 +149,5 @@ urlpatterns = [
          batch_generate_payslips, 
          name='api-batch-payslips'),
     
-    # ========================================================================
-    # REST API (ViewSets via Router)
-    # ========================================================================
-    path('api/', include(router.urls)),
+    # API endpoints have been moved to api_urls.py to bypass LocaleMiddleware
 ]

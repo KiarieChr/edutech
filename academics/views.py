@@ -163,15 +163,15 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
                 is_active=True,
                 is_deleted=False
             ).order_by('level_order')
-            # Limit grades to those matching the institution type
-            subsequent_grades = self._filter_grades_by_institution(subsequent_grades)
+            # Removed _filter_grades_by_institution here so it doesn't strip the intake's intended progression map
+            # subsequent_grades = self._filter_grades_by_institution(subsequent_grades)
 
             # 3. Zip them to map Year X -> Grade X
             # We only generate as far as we have BOTH years and grades
             progression_map = list(zip(subsequent_years, subsequent_grades))
 
             if not progression_map:
-                return Response({"error": "Could not determine progression map. Check Academic Years and Grades."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Could not determine progression map. Ensure there are active future Academic Years and Grades in the curriculum starting from the entry grade."}, status=status.HTTP_400_BAD_REQUEST)
 
             # Validate Inconsistency: Do we have enough years for the grades?
             # User requirement: "IF NOT RAISE AN INCOSITENCY ERROR"
@@ -288,6 +288,36 @@ class ClassSessionViewSet(viewsets.ModelViewSet):
             "academic_year": academic_year.name,
             "institution_type": inst_type,
             "grades_included": list(grades.values_list('name', flat=True)),
+        })
+
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        session = self.get_object()
+        session.status = 'active'
+        session.save()
+        return Response({
+            "status": "active",
+            "message": f"Successfully activated class session '{session.name}'."
+        })
+
+    @action(detail=True, methods=['post'])
+    def close(self, request, pk=None):
+        session = self.get_object()
+        session.status = 'closed'
+        session.save()
+        return Response({
+            "status": "closed",
+            "message": f"Successfully closed class session '{session.name}'."
+        })
+
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        session = self.get_object()
+        session.status = 'archived'
+        session.save()
+        return Response({
+            "status": "archived",
+            "message": f"Successfully archived class session '{session.name}'."
         })
 
 class StudentSessionEnrollmentViewSet(viewsets.ModelViewSet):

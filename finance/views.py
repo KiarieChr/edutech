@@ -39,8 +39,8 @@ class AccountViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(self.queryset, many=True)
         return Response(serializer.data)
 
-from .models import Tax, FinanceSettings, FiscalPeriod, Cashbook, PaymentMethod
-from .serializers import TaxSerializer, FinanceSettingsSerializer, FiscalPeriodSerializer, CashbookSerializer, PaymentMethodSerializer
+from .models import Tax, FinanceSettings, FiscalPeriod, Cashbook, PaymentMethod, SponsorType, Sponsorship
+from .serializers import TaxSerializer, FinanceSettingsSerializer, FiscalPeriodSerializer, CashbookSerializer, PaymentMethodSerializer, SponsorTypeSerializer, SponsorshipSerializer
 
 class TaxViewSet(viewsets.ModelViewSet):
     queryset = Tax.objects.all()
@@ -170,6 +170,26 @@ class FinanceSettingsView(viewsets.ViewSet):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class SponsorTypeViewSet(viewsets.ModelViewSet):
+    queryset = SponsorType.objects.all().select_related('clearing_account')
+    serializer_class = SponsorTypeSerializer
+    pagination_class = None
+    
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+class SponsorshipViewSet(viewsets.ModelViewSet):
+    queryset = Sponsorship.objects.all().select_related('sponsor_type', 'sponsor_type__clearing_account')
+    serializer_class = SponsorshipSerializer
+    pagination_class = None
+    
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
    
 

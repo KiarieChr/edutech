@@ -22,7 +22,7 @@ from .models import (
     LeaveType, EmployeeLeaveBalance, LeaveApplication,
     LeaveEncashment,
     # Performance
-    PerformanceMetric, AppraisalCycle, EmployeeAppraisal,
+    PerformanceMetric, AppraisalCycle, EmployeeAppraisal, EmployeePerformanceGoal,
     AcademicProductivity, Publication, ResearchGrant,
     # Payroll
     PayrollPeriod, EarningType, DeductionType,
@@ -737,6 +737,18 @@ class EmployeeAppraisalSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = EmployeeAppraisal
+        fields = '__all__'
+
+
+class EmployeePerformanceGoalSerializer(serializers.ModelSerializer):
+    """Employee performance goal serializer"""
+    employee_name = serializers.CharField(
+        source='employee.get_full_name', 
+        read_only=True
+    )
+    
+    class Meta:
+        model = EmployeePerformanceGoal
         fields = '__all__'
 
 

@@ -28,6 +28,7 @@ import logging
 from .models import User, Student, Parent, Activity
 from django.contrib.auth.models import Group, Permission
 from .serializers import (
+    StudentSerializer,
     UserSerializer, UserDetailSerializer, UserCreateSerializer,
     UserUpdateSerializer, LoginSerializer, EmailLoginSerializer,
     FirstTimeSetupSerializer, PasswordChangeSerializer,
@@ -1004,7 +1005,15 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def sessions(self, request):
         """Get active sessions for the current user (one UserToken per login)."""
+        from django.utils import timezone
+        from datetime import timedelta
+        
         current_token_id = request.auth.id if isinstance(request.auth, UserToken) else None
+        client_ip = Activity.get_client_ip(request)
+
+        # Prune sessions older than 4 hours automatically
+        four_hours_ago = timezone.now() - timedelta(hours=4)
+        UserToken.objects.filter(user=request.user, last_used__lt=four_hours_ago).exclude(id=current_token_id).delete()
 
         tokens = UserToken.objects.filter(user=request.user)
         user_sessions = [
@@ -1020,6 +1029,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 'expire_date': t.last_used,  # alias for legacy serializer field
                 'current': t.id == current_token_id,
                 'label': t.label,
+                'is_same_network': bool(client_ip and t.ip_address == client_ip),
             }
             for t in tokens
         ]
@@ -1158,6 +1168,34 @@ class UserViewSet(viewsets.ModelViewSet):
                 'message': f'Permissions updated for {user.get_full_name or user.username}',
                 'direct_permissions': PermissionSerializer(user.user_permissions.all(), many=True).data
             })
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
+    def link_employee(self, request, pk=None):
+        """Link an existing HR Employee profile to this user"""
+        user = self.get_object()
+        employee_id = request.data.get('employee_id')
+        
+        if not employee_id:
+            return Response({'success': False, 'message': 'employee_id is required'}, status=400)
+            
+        try:
+            from workforce.core_models import Employee
+            employee = Employee.objects.get(id=employee_id)
+            if employee.user and employee.user.id != user.id:
+                return Response({'success': False, 'message': 'This employee is already linked to another user'}, status=400)
+                
+            # If user is already linked to another employee, unlink it first
+            Employee.objects.filter(user=user).update(user=None)
+            
+            employee.user = user
+            employee.save(update_fields=['user'])
+            
+            return Response({
+                'success': True, 
+                'message': f'Successfully linked {employee.get_full_name()} to {user.username}'
+            })
+        except Exception as e:
+            return Response({'success': False, 'message': 'Employee not found or linking failed'}, status=404)
 
 
 class ForgotPasswordAPIView(APIView):
@@ -1404,3 +1442,11 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PermissionSerializer
     permission_classes = [IsAdminUser]
     pagination_class = None  # Return all permissions at once for the matrix
+
+class StudentViewSet(viewsets.ModelViewSet):
+    queryset = Student.objects.all().select_related('student', 'intake', 'campus').order_by('-student__date_joined')
+    serializer_class = StudentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['student__first_name', 'student__last_name', 'student__email', 'admission_number']
+    ordering_fields = ['student__date_joined', 'student__first_name', 'admission_number']

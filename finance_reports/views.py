@@ -294,7 +294,8 @@ class ReportViewSet(viewsets.ViewSet):
         academic_year_id = request.query_params.get('academic_year')
         term_id = request.query_params.get('term')
         session_id = request.query_params.get('session')
-        min_balance = Decimal(request.query_params.get('min_balance', '0.01'))
+        min_bal_param = request.query_params.get('min_balance')
+        min_balance = Decimal(min_bal_param) if min_bal_param else Decimal('0.01')
         search = request.query_params.get('search', '')
         page = int(request.query_params.get('page', 1))
         page_size = int(request.query_params.get('page_size', 50))
@@ -309,13 +310,13 @@ class ReportViewSet(viewsets.ViewSet):
             filters &= Q(class_session_id=session_id)
         if search:
             filters &= (
-                Q(student__user__first_name__icontains=search) |
-                Q(student__user__last_name__icontains=search) |
+                Q(student__student__first_name__icontains=search) |
+                Q(student__student__last_name__icontains=search) |
                 Q(student__admission_number__icontains=search)
             )
 
         qs = FeeInvoice.objects.filter(filters).select_related(
-            'student__user', 'class_session', 'term', 'academic_year'
+            'student__student', 'class_session', 'term', 'academic_year'
         ).order_by(sort_by if sort_by in ['balance', '-balance', 'student__admission_number'] else '-balance')
 
         total_count = qs.count()
@@ -345,7 +346,7 @@ class ReportViewSet(viewsets.ViewSet):
             rows.append({
                 'student_id': inv.student_id,
                 'admission_number': inv.student.admission_number if inv.student else '',
-                'student_name': inv.student.user.get_full_name if inv.student else '',
+                'student_name': inv.student.student.get_full_name if (inv.student and hasattr(inv.student, 'student') and inv.student.student) else '',
                 'class_session': inv.class_session.name if inv.class_session else '',
                 'term': inv.term.name if inv.term else '',
                 'academic_year': inv.academic_year.name if inv.academic_year else '',
@@ -647,10 +648,9 @@ class ReportViewSet(viewsets.ViewSet):
         from django.db.models import Sum as DSum
         qs = FeeInvoice.objects.filter(filters).values(
             'student_id',
-            'student__user__first_name',
-            'student__user__last_name',
+            'student__student__first_name',
+            'student__student__last_name',
             'student__admission_number',
-            'class_session__name',
         ).annotate(
             total_invoiced=DSum('total_amount'),
             total_paid=DSum('paid_amount'),
@@ -659,13 +659,18 @@ class ReportViewSet(viewsets.ViewSet):
 
         rows = []
         for r in qs:
-            first = r['student__user__first_name'] or ''
-            last = r['student__user__last_name'] or ''
+            first = r['student__student__first_name'] or ''
+            last = r['student__student__last_name'] or ''
+            
+            # Get latest class session for the student
+            latest_invoice = FeeInvoice.objects.filter(student_id=r['student_id']).select_related('class_session').order_by('-date_issued').first()
+            class_session_name = latest_invoice.class_session.name if latest_invoice and latest_invoice.class_session else ''
+            
             rows.append({
                 'student_id': r['student_id'],
                 'student_name': f"{first} {last}".strip(),
                 'admission_number': r['student__admission_number'] or '',
-                'class_session': r['class_session__name'] or '',
+                'class_session': class_session_name,
                 'total_invoiced': float(r['total_invoiced'] or 0),
                 'total_paid': float(r['total_paid'] or 0),
                 'total_balance': float(r['total_balance'] or 0),

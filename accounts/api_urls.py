@@ -8,7 +8,8 @@ from .api_views import (
     RegisterAPIView, DashboardStatsAPIView,
     DebugDashboardView, csrf, MeAPIView,FirstTimeSetupStatusAPIView, SetupCompleteAPIView,
     RoleViewSet, PermissionViewSet,
-    ForgotPasswordAPIView, VerifyOTPAPIView, ResetPasswordAPIView
+    ForgotPasswordAPIView, VerifyOTPAPIView, ResetPasswordAPIView,
+    StudentViewSet
 )
 
 
@@ -16,7 +17,7 @@ router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'roles', RoleViewSet, basename='role')
 router.register(r'permissions', PermissionViewSet, basename='permission')
-#router.register(r'students', StudentViewSet, basename='student')
+router.register(r'accounts/students', StudentViewSet, basename='student')
 #router.register(r'parents', ParentViewSet, basename='parent')
 
 urlpatterns = [

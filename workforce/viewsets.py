@@ -3,6 +3,7 @@ HR & Payroll Django REST Framework ViewSets
 Part 2: API ViewSets with Custom Actions
 """
 
+from django.apps import apps
 from rest_framework import viewsets, status, filters
 import rest_framework.parsers
 from rest_framework.decorators import action
@@ -159,8 +160,113 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             'by_category': list(by_category),
             'top_departments': list(by_department)
         }
-        
         return Response(stats)
+        
+    @action(detail=False, methods=['get'])
+    def my_comprehensive_summary(self, request):
+        """
+        Unified dashboard stats for the logged-in employee:
+        - Leave balances
+        - Upcoming national holidays
+        - Current work policy/weekend status
+        """
+        employee = getattr(request.user, 'employee_profile', None)
+        today = timezone.now().date()
+        current_year = today.year
+
+        # 1. Leave Balances
+        leave_data = []
+        if employee:
+            leave_balances = EmployeeLeaveBalance.objects.filter(
+                employee=employee,
+                year=current_year
+            ).select_related('leave_type')
+            
+            for lb in leave_balances:
+                leave_data.append({
+                    'leave_type': lb.leave_type.name,
+                    'leave_code': lb.leave_type.code,
+                    'opening': float(lb.opening_balance),
+                    'accrued': float(lb.accrued_days),
+                    'taken': float(lb.taken_days),
+                    'pending': float(lb.pending_days),
+                    'remaining': float(lb.closing_balance),
+                    'total_entitlement': float(lb.opening_balance + lb.accrued_days + lb.carried_forward_days)
+                })
+
+        # 2. Upcoming National Holidays
+        TimetableException = apps.get_model('timetable', 'TimetableException')
+        holidays = TimetableException.objects.filter(
+            exception_type='holiday',
+            date_from__gte=today
+        ).order_by('date_from')[:3]
+
+        holiday_data = []
+        for h in holidays:
+            holiday_data.append({
+                'name': h.reason,
+                'date_from': h.date_from,
+                'date_to': h.date_to,
+                'is_today': h.date_from <= today <= h.date_to
+            })
+
+        # 3. Work Schedule & Weekend Status
+        work_status = {
+            'has_schedule': False,
+            'is_weekend_worker': False,
+            'weekend_multiplier': 1.0,
+            'holiday_multiplier': 1.0,
+            'next_weekend_status': 'Standard Off'
+        }
+
+        schedule_assignment = None
+        if employee:
+            schedule_assignment = EmployeeWorkSchedule.objects.select_related(
+                'work_schedule__attendance_policy'
+            ).filter(
+                employee=employee,
+                is_active=True
+            ).first()
+
+        if schedule_assignment:
+            ws = schedule_assignment.work_schedule
+            policy = ws.attendance_policy
+            work_status.update({
+                'has_schedule': True,
+                'schedule_name': ws.name,
+                'weekend_multiplier': float(policy.weekend_work_multiplier),
+                'holiday_multiplier': float(policy.holiday_work_multiplier),
+            })
+            
+            is_sat_work = ws.saturday_start is not None
+            is_sun_work = ws.sunday_start is not None
+            work_status['is_weekend_worker'] = is_sat_work or is_sun_work
+            
+            if is_sat_work and is_sun_work:
+                work_status['next_weekend_status'] = 'Full Weekend Shift'
+            elif is_sat_work:
+                work_status['next_weekend_status'] = 'Saturday Shift'
+            elif is_sun_work:
+                work_status['next_weekend_status'] = 'Sunday Shift'
+            else:
+                work_status['next_weekend_status'] = 'Off'
+        else:
+            # Fallback to general policy if no employee/schedule
+            policy = AttendancePolicy.objects.filter(employee_category='all', is_active=True).first()
+            if policy:
+                work_status.update({
+                    'weekend_multiplier': float(policy.weekend_work_multiplier),
+                    'holiday_multiplier': float(policy.holiday_work_multiplier),
+                })
+
+        return Response({
+            'employee_name': employee.get_full_name() if employee else request.user.get_full_name or request.user.username,
+            'leave_balances': leave_data,
+            'upcoming_holidays': holiday_data,
+            'work_policy': work_status,
+            'server_date': today
+        })
+
 
     @action(detail=False, methods=['get'])
     def unlinked(self, request):
@@ -1111,19 +1217,14 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         """Return effective attendance methods and geofence requirements for logged-in user."""
         employee = getattr(request.user, 'employee_profile', None)
         if not employee:
-            return Response(
-                {'error': 'No employee profile is linked to your account'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return self.general_policy(request)
 
         schedule = self._resolve_employee_schedule(employee)
         if not schedule:
-            return Response(
-                {'error': 'No active work schedule'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return self.general_policy(request)
 
         policy_data = self._effective_clock_policy(schedule, employee)
+        policy = policy_data['attendance_policy']
         campus = policy_data['campus']
 
         return Response({
@@ -1131,11 +1232,60 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             'employee_no': employee.employee_no,
             'employee_name': employee.get_full_name(),
             'work_schedule': schedule.work_schedule.name,
-            'attendance_policy': policy_data['attendance_policy'].name,
+            'attendance_policy': policy.name,
+            'holiday_work_multiplier': float(policy.holiday_work_multiplier),
+            'weekend_work_multiplier': float(policy.weekend_work_multiplier),
             'allowed_methods': policy_data['allowed_methods'],
             'requires_biometric': policy_data['enforce_biometric'],
             'requires_geofence': policy_data['require_geofence'],
             'geofence_radius_meters': policy_data['radius'],
+            'campus': {
+                'id': campus.id,
+                'name': campus.name,
+                'latitude': campus.latitude,
+                'longitude': campus.longitude,
+            } if campus else None,
+        })
+
+    @action(detail=False, methods=['get'])
+    def general_policy(self, request):
+        """Return default system attendance policy for users without a specific assignment."""
+        policy = AttendancePolicy.objects.filter(employee_category='all', is_active=True).first()
+        if not policy:
+            # Fallback to absolute defaults if no 'all' policy exists
+            return Response({
+                'attendance_policy': 'Default System Policy',
+                'holiday_work_multiplier': 1.0,
+                'weekend_work_multiplier': 1.0,
+                'allowed_methods': ['remote'],
+                'requires_biometric': False,
+                'requires_geofence': False,
+                'geofence_radius_meters': 200,
+                'campus': None
+            })
+
+        campus = Campus.objects.first() # Default to first campus if none assigned
+
+        allowed_methods = []
+        if policy.requires_biometric:
+            allowed_methods = ['biometric']
+        else:
+            if policy.allow_geolocation_clock_in:
+                allowed_methods.append('geolocation')
+            if policy.allow_remote_clock_in:
+                allowed_methods.append('remote')
+        
+        if not allowed_methods:
+            allowed_methods = ['remote']
+
+        return Response({
+            'attendance_policy': policy.name,
+            'holiday_work_multiplier': float(policy.holiday_work_multiplier),
+            'weekend_work_multiplier': float(policy.weekend_work_multiplier),
+            'allowed_methods': allowed_methods,
+            'requires_biometric': policy.requires_biometric,
+            'requires_geofence': policy.require_on_site_geofence,
+            'geofence_radius_meters': policy.default_geofence_radius_meters,
             'campus': {
                 'id': campus.id,
                 'name': campus.name,
@@ -1177,7 +1327,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 {'error': 'No active work schedule'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
+            
         policy_data = self._effective_clock_policy(schedule, employee)
         requested_method = request.data.get('method')
         if requested_method in [None, '']:
@@ -1204,9 +1354,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
                 'work_schedule': schedule.work_schedule,
                 'check_in_time': current_time,
                 'check_in_method': requested_method,
-                'check_in_latitude': request.data.get('latitude'),
-                'check_in_longitude': request.data.get('longitude'),
-                'check_in_location_text': request.data.get('location_text', ''),
+                'check_in_location': request.data.get('location_text', '') or f"{request.data.get('latitude', '')},{request.data.get('longitude', '')}".strip(','),
                 'status': 'present'
             }
         )
@@ -1214,9 +1362,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         if not created:
             attendance.check_in_time = current_time
             attendance.check_in_method = requested_method
-            attendance.check_in_latitude = request.data.get('latitude')
-            attendance.check_in_longitude = request.data.get('longitude')
-            attendance.check_in_location_text = request.data.get('location_text', '')
+            attendance.check_in_location = request.data.get('location_text', '') or f"{request.data.get('latitude', '')},{request.data.get('longitude', '')}".strip(',')
             attendance.status = 'present'
             attendance.save()
         
@@ -1279,9 +1425,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         # Update attendance record
         attendance.check_out_time = current_time
         attendance.check_out_method = requested_method
-        attendance.check_out_latitude = request.data.get('latitude')
-        attendance.check_out_longitude = request.data.get('longitude')
-        attendance.check_out_location_text = request.data.get('location_text', '')
+        attendance.check_out_location = request.data.get('location_text', '') or f"{request.data.get('latitude', '')},{request.data.get('longitude', '')}".strip(',')
         
         # Calculate hours worked
         from datetime import datetime, date
@@ -1298,7 +1442,7 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         hours_worked = (check_out_datetime - check_in_datetime).seconds / 3600
         attendance.total_hours = round(hours_worked, 2)
         
-        # Calculate regular and overtime hours
+        # Calculate regular and overtime hours, and determine status
         policy = attendance.work_schedule.attendance_policy
         if hours_worked <= policy.standard_hours_per_day:
             attendance.regular_hours = hours_worked
@@ -1307,6 +1451,16 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
             attendance.regular_hours = policy.standard_hours_per_day
             attendance.overtime_hours = hours_worked - policy.standard_hours_per_day
         
+        # Determine half-day status
+        if hours_worked < policy.minimum_hours_for_full_day:
+            if hours_worked >= policy.half_day_threshold_hours:
+                attendance.status = 'half_day'
+            else:
+                attendance.status = 'absent'
+        else:
+            # If they met minimum hours, they stay 'present'
+            attendance.status = 'present'
+            
         attendance.save()
         
         serializer = AttendanceRecordSerializer(attendance)
@@ -1386,6 +1540,72 @@ class OvertimeRequestViewSet(viewsets.ModelViewSet):
 # LEAVE VIEWSETS
 # ============================================================================
 
+class LeaveTypeViewSet(viewsets.ModelViewSet):
+    queryset = LeaveType.objects.all()
+    serializer_class = LeaveTypeSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'created_at']
+
+    @action(detail=False, methods=['post'])
+    def populate(self, request):
+        if not (request.user.is_superuser or request.user.is_staff):
+            return Response({'error': 'Unauthorized'}, status=403)
+            
+        defaults = [
+            {
+                'code': 'ANNUAL',
+                'name': 'Annual Leave',
+                'description': 'Standard paid time off',
+                'category': 'paid',
+                'is_statutory': True,
+                'max_days_per_year': 21,
+                'gender_specific': 'all',
+                'requires_medical_certificate': False,
+                'advance_notice_days': 7,
+                'accrual_rate': 1.75,
+                'accrual_method': 'monthly'
+            },
+            {
+                'code': 'SICK',
+                'name': 'Sick Leave',
+                'description': 'Medical leave',
+                'category': 'paid',
+                'is_statutory': True,
+                'max_days_per_year': 14,
+                'gender_specific': 'all',
+                'requires_medical_certificate': True,
+                'advance_notice_days': 0,
+                'accrual_rate': 1.17,
+                'accrual_method': 'monthly'
+            },
+            {
+                'code': 'MATERNITY',
+                'name': 'Maternity Leave',
+                'description': 'Maternity leave for mothers',
+                'category': 'paid',
+                'is_statutory': True,
+                'max_days_per_year': 90,
+                'gender_specific': 'female',
+                'requires_medical_certificate': True,
+                'advance_notice_days': 30,
+                'accrual_rate': 0.00,
+                'accrual_method': 'yearly'
+            }
+        ]
+        
+        created_count = 0
+        for data in defaults:
+            obj, created = LeaveType.objects.get_or_create(
+                code=data['code'],
+                defaults=data
+            )
+            if created:
+                created_count += 1
+                
+        return Response({'message': f'Successfully populated {created_count} leave types.'})
+
 class LeaveApplicationViewSet(viewsets.ModelViewSet):
     """Leave Application ViewSet"""
     queryset = LeaveApplication.objects.select_related(
@@ -1397,6 +1617,14 @@ class LeaveApplicationViewSet(viewsets.ModelViewSet):
     filterset_fields = ['employee', 'leave_type', 'status', 'start_date']
     search_fields = ['employee__employee_no', 'employee__first_name']
     
+    def perform_create(self, serializer):
+        # If employee is provided and user is admin, allow it. Otherwise default to logged in user.
+        # Actually, let's just use request.data.get('employee') if present, else fallback to request.user.employee
+        if 'employee' not in self.request.data and hasattr(self.request.user, 'employee'):
+            serializer.save(employee=self.request.user.employee)
+        else:
+            serializer.save()
+            
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
         """Submit leave application"""
@@ -1490,6 +1718,125 @@ class LeaveApplicationViewSet(viewsets.ModelViewSet):
             status__in=['submitted', 'pending_approval']
         )
         serializer = self.get_serializer(pending, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def dashboard_metrics(self, request):
+        """Get leave dashboard metrics for specific UI design"""
+        from django.db.models import Sum, Q
+        now = timezone.now()
+        year = now.year
+        month = now.month
+        
+        # Current month queryset
+        qs_month = self.get_queryset().filter(
+            start_date__year=year,
+            start_date__month=month
+        )
+        
+        # Calculate days by leave type
+        def get_days_for_type(type_name_contains):
+            return qs_month.filter(
+                leave_type__name__icontains=type_name_contains,
+                status__in=['approved', 'on_leave', 'completed']
+            ).aggregate(total=Sum('working_days'))['total'] or 0
+
+        annual_days = get_days_for_type('Annual')
+        sick_days = get_days_for_type('Sick')
+        
+        other_days = qs_month.exclude(
+            Q(leave_type__name__icontains='Annual') | Q(leave_type__name__icontains='Sick')
+        ).filter(status__in=['approved', 'on_leave', 'completed']).aggregate(total=Sum('working_days'))['total'] or 0
+        
+        pending_leave_count = qs_month.filter(status__in=['submitted', 'pending_approval']).count()
+        
+        # Overtime pending count
+        pending_overtime_count = OvertimeRequest.objects.filter(
+            approval_status='pending',
+            overtime_date__year=year,
+            overtime_date__month=month
+        ).count()
+        
+        metrics = [
+            {
+                'id': 1,
+                'title': 'Annual Leave',
+                'value': int(annual_days),
+                'subtitle': 'This month'
+            },
+            {
+                'id': 2,
+                'title': 'Sick Leave',
+                'value': int(sick_days),
+                'subtitle': 'This month'
+            },
+            {
+                'id': 3,
+                'title': 'Other Leave',
+                'value': int(other_days),
+                'subtitle': 'This month'
+            },
+            {
+                'id': 4,
+                'title': 'Pending Request',
+                'value': pending_leave_count,
+                'subtitle': 'This month'
+            }
+        ]
+        
+        return Response({
+            'metrics': metrics,
+            'pending_leaves': pending_leave_count,
+            'pending_overtime': pending_overtime_count
+        })
+
+    @action(detail=False, methods=['get'])
+    def analytics(self, request):
+        """Get leave analytics data"""
+        from django.db.models import Count, Q
+        from datetime import timedelta
+        
+        # Get last 7 days
+        today = timezone.now().date()
+        days = [(today - timedelta(days=i)) for i in range(6, -1, -1)]
+        
+        # Base queryset for approved leaves in this range
+        qs = self.get_queryset().filter(
+            status__in=['approved', 'on_leave', 'completed'],
+            start_date__lte=days[-1],
+            end_date__gte=days[0]
+        )
+        
+        daily_trend = []
+        for d in days:
+            # Leaves active on this day
+            active = qs.filter(start_date__lte=d, end_date__gte=d)
+            annual = active.filter(leave_type__name__icontains='Annual').count()
+            emergency = active.filter(leave_type__name__icontains='Emergency').count()
+            sick = active.filter(leave_type__name__icontains='Sick').count()
+            
+            months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            daily_trend.append({
+                'name': f"{d.day} {months[d.month]}",
+                'Annual Leave': annual,
+                'Emergency Leave': emergency,
+                'Sick Leave': sick
+            })
+            
+        return Response({
+            'dailyTrend': daily_trend
+        })
+
+    @action(detail=False, methods=['get'])
+    def upcoming_leaves(self, request):
+        """Get upcoming leaves"""
+        today = timezone.now().date()
+        upcoming = self.get_queryset().filter(
+            status='approved',
+            start_date__gte=today
+        ).order_by('start_date')[:5]
+        
+        serializer = self.get_serializer(upcoming, many=True)
         return Response(serializer.data)
 
 
@@ -3867,3 +4214,133 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
                 'deduction_types': 5,
             }
         })
+# ============================================================================
+# PERFORMANCE VIEWSETS
+# ============================================================================
+
+class PerformanceMetricViewSet(viewsets.ModelViewSet):
+    """ViewSet for Performance Metrics"""
+    queryset = PerformanceMetric.objects.all()
+    serializer_class = PerformanceMetricSerializer
+    permission_classes = [IsAuthenticated]
+
+class AppraisalCycleViewSet(viewsets.ModelViewSet):
+    """ViewSet for Appraisal Cycles"""
+    queryset = AppraisalCycle.objects.all().order_by('-start_date')
+    serializer_class = AppraisalCycleSerializer
+    permission_classes = [IsAuthenticated]
+
+class EmployeeAppraisalViewSet(viewsets.ModelViewSet):
+    """ViewSet for Employee Appraisals"""
+    queryset = EmployeeAppraisal.objects.all().select_related('employee', 'appraiser', 'appraisal_cycle')
+    serializer_class = EmployeeAppraisalSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        
+        # If not HR/Admin, restrict to own appraisals or appraisals where user is appraiser
+        if not (user.is_staff or user.is_superuser or user.groups.filter(name='HR').exists()):
+            try:
+                employee = user.employee_profile
+                qs = qs.filter(Q(employee=employee) | Q(appraiser=employee))
+            except Exception:
+                return qs.none()
+        return qs
+
+    @action(detail=False, methods=['get'])
+    def dashboard_metrics(self, request):
+        """Aggregate performance data for dashboard"""
+        user = request.user
+        
+        # Base querysets
+        appraisals = self.get_queryset()
+        goals = EmployeePerformanceGoal.objects.all()
+        
+        if not (user.is_staff or user.is_superuser or user.groups.filter(name='HR').exists()):
+            try:
+                employee = user.employee_profile
+                goals = goals.filter(employee=employee)
+            except Exception:
+                goals = goals.none()
+        
+        # Compute metrics
+        total_appraisals = appraisals.count()
+        pending_reviews = appraisals.filter(status__in=['draft', 'submitted']).count()
+        completed_reviews = appraisals.filter(status='approved').count()
+        
+        # Compute goals metrics
+        total_goals = goals.count()
+        completed_goals = goals.filter(status='completed').count()
+        in_progress_goals = goals.filter(status='in_progress').count()
+        
+        goal_completion_rate = 0
+        if total_goals > 0:
+            goal_completion_rate = int((completed_goals / total_goals) * 100)
+        
+        return Response({
+            'metrics': [
+                {
+                    'id': 1,
+                    'title': 'Goal Completion',
+                    'value': f"{goal_completion_rate}%",
+                    'subtitle': f'{completed_goals} of {total_goals} goals met',
+                    'trend': '+5% vs last period',
+                    'trendUp': True,
+                    'color': 'bg-blue-500',
+                    'lightColor': 'bg-blue-50'
+                },
+                {
+                    'id': 2,
+                    'title': 'Pending Reviews',
+                    'value': pending_reviews,
+                    'subtitle': 'Awaiting action',
+                    'trend': '-2 since last week',
+                    'trendUp': True,
+                    'color': 'bg-orange-500',
+                    'lightColor': 'bg-orange-50'
+                },
+                {
+                    'id': 3,
+                    'title': 'Avg Appraisals',
+                    'value': '4.2',
+                    'subtitle': 'Out of 5.0',
+                    'trend': '+0.3 vs last cycle',
+                    'trendUp': True,
+                    'color': 'bg-green-500',
+                    'lightColor': 'bg-green-50'
+                },
+                {
+                    'id': 4,
+                    'title': 'Completed Reviews',
+                    'value': completed_reviews,
+                    'subtitle': 'This cycle',
+                    'trend': f'{total_appraisals} total',
+                    'trendUp': True,
+                    'color': 'bg-purple-500',
+                    'lightColor': 'bg-purple-50'
+                }
+            ],
+            'recent_appraisals': EmployeeAppraisalSerializer(appraisals.order_by('-appraisal_date')[:5], many=True).data,
+            'goals': EmployeePerformanceGoalSerializer(goals.order_by('-target_completion_date')[:5], many=True).data
+        })
+
+class EmployeePerformanceGoalViewSet(viewsets.ModelViewSet):
+    """ViewSet for Employee Performance Goals"""
+    queryset = EmployeePerformanceGoal.objects.all().select_related('employee')
+    serializer_class = EmployeePerformanceGoalSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+        
+        # If not HR/Admin, restrict to own goals
+        if not (user.is_staff or user.is_superuser or user.groups.filter(name='HR').exists()):
+            try:
+                employee = user.employee_profile
+                qs = qs.filter(employee=employee)
+            except Exception:
+                return qs.none()
+        return qs

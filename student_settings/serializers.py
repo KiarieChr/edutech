@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     AcademicYear, Term, Curriculum, GradeStructure, Stream,
-    AdmissionConfig, StudentStatus, PromotionRule, DemographicConfig, SchoolCalendar, Intake,
+    AdmissionConfig, AdmissionWorkflowConfig, StudentStatus,
+    PromotionRule, DemographicConfig, SchoolCalendar, Intake,
     CurriculumLevel, LearningArea
 )
 
@@ -101,6 +102,14 @@ class GradeStructureSerializer(serializers.ModelSerializer):
 class AdmissionConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = AdmissionConfig
+        fields = '__all__'
+
+
+class AdmissionWorkflowConfigSerializer(serializers.ModelSerializer):
+    active_stages = serializers.ListField(read_only=True)
+
+    class Meta:
+        model = AdmissionWorkflowConfig
         fields = '__all__'
 
 class StudentStatusSerializer(serializers.ModelSerializer):

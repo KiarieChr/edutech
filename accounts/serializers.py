@@ -254,6 +254,9 @@ class UserSerializer(serializers.ModelSerializer):
         source='groups', write_only=True, required=False
     )
     permissions = serializers.SerializerMethodField(read_only=True)
+    employee_id = serializers.IntegerField(source='employee_profile.id', read_only=True, allow_null=True)
+    employee_no = serializers.CharField(source='employee_profile.employee_no', read_only=True, allow_null=True)
+    employee_name = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = User
@@ -262,9 +265,15 @@ class UserSerializer(serializers.ModelSerializer):
             'is_student', 'is_lecturer', 'is_parent', 'is_dep_head', 'is_superuser',
             'is_active', 'gender', 'phone', 'address', 'picture', 'picture_url',
             'is_first_login', 'date_joined', 'last_login', 'profile_url', 'role',
-            'groups', 'group_ids', 'permissions'
+            'groups', 'group_ids', 'permissions', 'session_timeout',
+            'employee_id', 'employee_no', 'employee_name'
         ]
         read_only_fields = ['date_joined', 'last_login', 'is_superuser']
+
+    def get_employee_name(self, obj):
+        if hasattr(obj, 'employee_profile') and obj.employee_profile:
+            return obj.employee_profile.get_full_name()
+        return None
 
     def get_permissions(self, obj):
         return list(obj.get_all_permissions())
@@ -371,7 +380,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'email', 'username', 'first_name', 'last_name',
-            'gender', 'phone', 'address', 'picture', 'is_active'
+            'gender', 'phone', 'address', 'picture', 'is_active', 'session_timeout'
         ]
         extra_kwargs = {
             'email': {'required': False},
@@ -429,10 +438,9 @@ class StudentSerializer(serializers.ModelSerializer):
     
     # Intake/Cohort information
     intake_id = serializers.IntegerField(source='intake.id', read_only=True, allow_null=True)
-    intake_name = serializers.CharField(read_only=True, allow_null=True)
-    intake_code = serializers.CharField(read_only=True, allow_null=True)
-    intake_year_name = serializers.CharField(read_only=True, allow_null=True)
-    years_in_school = serializers.IntegerField(read_only=True, allow_null=True)
+    intake_name = serializers.CharField(source='intake.name', read_only=True, allow_null=True)
+    intake_code = serializers.CharField(source='intake.code', read_only=True, allow_null=True)
+    intake_year_name = serializers.CharField(source='intake.academic_year.name', read_only=True, allow_null=True)
     
     # Current enrollment information (from new properties)
     current_grade_id = serializers.IntegerField(source='current_grade.id', read_only=True, allow_null=True)
@@ -449,18 +457,16 @@ class StudentSerializer(serializers.ModelSerializer):
     campus_id = serializers.IntegerField(source='campus.id', read_only=True, allow_null=True)
     campus_name = serializers.CharField(source='campus.name', read_only=True, allow_null=True)
     
-    # Program information
-    program_name = serializers.CharField(source='program.title', read_only=True, allow_null=True)
+    # Program information removed
     
     class Meta:
         model = Student
         fields = [
             'id', 'user_id', 'username', 'email', 'first_name', 'last_name', 
             'full_name', 'gender', 'phone', 'picture_url',
-            'level', 'program', 'program_name',
             # Intake fields
             'intake', 'intake_id', 'intake_name', 'intake_code',
-            'intake_year_name', 'admission_date', 'years_in_school',
+            'intake_year_name', 'admission_date',
             # Current enrollment fields
             'current_enrollment_id', 'current_grade_id', 'current_grade_name',
             'current_stream_id', 'current_stream_name',

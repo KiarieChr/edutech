@@ -6,11 +6,15 @@ class Application(BaseModel):
     Tracks applicants before they become students.
     """
     STATUS_CHOICES = (
-        ('pending', 'Pending Review'),
-        ('interview', 'Interview Scheduled'),
-        ('accepted', 'Accepted'),
-        ('rejected', 'Rejected'),
-        ('waitlist', 'Waitlisted'),
+        ('pending',     'Pending Review'),
+        ('fee_pending', 'Registration Fee Pending'),   # requires_application_fee
+        ('fee_paid',    'Registration Fee Paid'),       # requires_application_fee
+        ('interview',   'Interview Scheduled'),
+        ('interviewed', 'Interview Completed'),          # requires_interview
+        ('reporting',   'Reporting Scheduled'),          # requires_reporting
+        ('accepted',    'Accepted'),
+        ('rejected',    'Rejected'),
+        ('waitlist',    'Waitlisted'),
     )
     
     RELIGION_CHOICES = (
