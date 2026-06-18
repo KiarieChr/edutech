@@ -178,7 +178,7 @@ class PayrollCalculationService:
                 Q(effective_to__isnull=True) | Q(effective_to__gte=self.period.start_date)
             )
             .order_by('-effective_from')
-            .select_related('pay_profile')
+            .select_related('pay_profile', 'pay_grade_step__job_grade')
             .first()
         )
 
@@ -186,7 +186,13 @@ class PayrollCalculationService:
             raise ValueError("No active pay profile found")
 
         basic_salary = _round(pay_profile.basic_salary)
-        job_grade = emp.job_grade
+        
+        # Resolve job grade from the pay profile's step if available, else fallback to employee record
+        job_grade = None
+        if pay_profile.pay_grade_step_id:
+            job_grade = pay_profile.pay_grade_step.job_grade
+        else:
+            job_grade = emp.job_grade
 
         # 2. Gather earnings (employee-level + group-level)
         earnings = self._get_all_earnings(emp, job_grade, basic_salary)
@@ -195,6 +201,8 @@ class PayrollCalculationService:
         total_allowances = ZERO
         total_overtime = ZERO
         total_bonuses = ZERO
+        taxable_earnings = ZERO
+        pensionable_earnings = ZERO
 
         for e in earnings:
             amount = e['amount']
@@ -205,15 +213,22 @@ class PayrollCalculationService:
                 total_bonuses += amount
             else:
                 total_allowances += amount
+                
+            if e.get('is_taxable', True):
+                taxable_earnings += amount
+            if e.get('is_pensionable', False):
+                pensionable_earnings += amount
 
         total_earnings = total_allowances + total_overtime + total_bonuses
         gross_pay = basic_salary + total_earnings
+        taxable_gross = basic_salary + taxable_earnings
+        pensionable_gross = basic_salary + pensionable_earnings
 
         # 4. Calculate statutory deductions (NSSF, SHIF, Housing Levy)
-        statutory = self._calculate_statutory(gross_pay, basic_salary)
+        statutory = self._calculate_statutory(gross_pay, basic_salary, pensionable_gross)
 
         # 5. Calculate third-party pension contributions
-        pension_result = self._calculate_pension(emp, basic_salary, gross_pay)
+        pension_result = self._calculate_pension(emp, basic_salary, gross_pay, pensionable_gross)
 
         # 6. Gather voluntary / loan deductions (employee-level + group-level)
         vol_deductions = self._get_all_deductions(emp, job_grade, gross_pay, basic_salary)
@@ -239,7 +254,7 @@ class PayrollCalculationService:
                 allowable_voluntary += d['amount']
         allowable_before_tax += allowable_voluntary
 
-        taxable_income = max(ZERO, gross_pay - allowable_before_tax)
+        taxable_income = max(ZERO, taxable_gross - allowable_before_tax)
 
         # PAYE with proper insurance relief from actual SHIF amount
         shif_amount = statutory.get('shif', ZERO)
@@ -348,8 +363,6 @@ class PayrollCalculationService:
 
         for earning in emp_earnings:
             amount = self._resolve_earning_amount(earning, basic_salary)
-            if amount <= ZERO:
-                continue
 
             pa = earning.payroll_account
             et = earning.earning_type
@@ -368,6 +381,9 @@ class PayrollCalculationService:
                 category = et.category if et else 'allowance'
                 description = et.name if et else 'Earning'
                 gl_code = et.gl_account_code if et else ''
+
+            if amount <= ZERO:
+                continue
 
             result.append({
                 'description': description,
@@ -395,7 +411,7 @@ class PayrollCalculationService:
                     continue  # Employee-level overrides group
 
                 pa = ge.payroll_account
-                amount = _round(ge.amount)
+                amount = self._resolve_group_earning_amount(ge, basic_salary)
                 if amount <= ZERO:
                     continue
 
@@ -416,17 +432,24 @@ class PayrollCalculationService:
         """Resolve earning amount based on calculation basis."""
         if earning.calculation_basis == 'fixed':
             return _round(earning.amount)
-        elif earning.calculation_basis == 'hours' and earning.units and earning.rate:
+        elif earning.calculation_basis == 'hours' and earning.units is not None and earning.rate is not None:
             pa = earning.payroll_account
             et = earning.earning_type
             cat = (pa.category if pa else (et.category if et else ''))
             multiplier = self.config.overtime_multiplier if cat == 'overtime' else Decimal('1')
             return _round(earning.units * earning.rate * multiplier)
-        elif earning.calculation_basis == 'rate' and earning.units and earning.rate:
+        elif earning.calculation_basis == 'rate' and earning.units is not None and earning.rate is not None:
             return _round(earning.units * earning.rate)
-        elif earning.calculation_basis == 'percentage' and earning.rate:
+        elif earning.calculation_basis == 'percentage' and earning.rate is not None:
             return _round(basic_salary * earning.rate / HUNDRED)
         return _round(earning.amount)
+
+    def _resolve_group_earning_amount(self, ge, basic_salary):
+        if getattr(ge, 'calculation_method', 'fixed') == 'fixed':
+            return _round(ge.amount)
+        elif getattr(ge, 'calculation_method', 'fixed') == 'percentage_of_basic' and ge.percentage is not None:
+            return _round(basic_salary * ge.percentage / HUNDRED)
+        return _round(ge.amount)
 
     # ------------------------------------------------------------------
     # Deductions resolution (Phase 1)
@@ -453,18 +476,11 @@ class PayrollCalculationService:
 
         for ded in emp_deductions:
             amount = self._resolve_deduction_amount(ded, gross_pay, basic_salary)
-            if amount <= ZERO:
-                continue
 
             pa = ded.payroll_account
             dt = ded.deduction_type
 
-            # For loans, don't deduct more than balance remaining
             category = (pa.category if pa else (dt.category if dt else 'voluntary'))
-            if category == 'loan' and ded.balance_remaining is not None:
-                if ded.balance_remaining <= ZERO:
-                    continue
-                amount = min(amount, _round(ded.balance_remaining))
 
             if pa:
                 description = pa.name
@@ -473,6 +489,15 @@ class PayrollCalculationService:
             else:
                 description = dt.name if dt else 'Deduction'
                 gl_code = dt.gl_account_code if dt else ''
+
+            if amount <= ZERO:
+                continue
+
+            # For loans, don't deduct more than balance remaining
+            if category == 'loan' and ded.balance_remaining is not None:
+                if ded.balance_remaining <= ZERO:
+                    continue
+                amount = min(amount, _round(ded.balance_remaining))
 
             result.append({
                 'description': description,
@@ -520,18 +545,18 @@ class PayrollCalculationService:
     def _resolve_deduction_amount(self, ded, gross_pay, basic_salary):
         if ded.calculation_method == 'fixed':
             return _round(ded.amount)
-        elif ded.calculation_method == 'percentage_of_gross' and ded.percentage:
+        elif ded.calculation_method == 'percentage_of_gross' and ded.percentage is not None:
             return _round(gross_pay * ded.percentage / HUNDRED)
-        elif ded.calculation_method == 'percentage_of_basic' and ded.percentage:
+        elif ded.calculation_method == 'percentage_of_basic' and ded.percentage is not None:
             return _round(basic_salary * ded.percentage / HUNDRED)
         return _round(ded.amount)
 
     def _resolve_group_deduction_amount(self, gd, gross_pay, basic_salary):
         if gd.calculation_method == 'fixed':
             return _round(gd.amount)
-        elif gd.calculation_method == 'percentage_of_gross' and gd.percentage:
+        elif gd.calculation_method == 'percentage_of_gross' and gd.percentage is not None:
             return _round(gross_pay * gd.percentage / HUNDRED)
-        elif gd.calculation_method == 'percentage_of_basic' and gd.percentage:
+        elif gd.calculation_method == 'percentage_of_basic' and gd.percentage is not None:
             return _round(basic_salary * gd.percentage / HUNDRED)
         return _round(gd.amount)
 
@@ -546,7 +571,7 @@ class PayrollCalculationService:
     # ------------------------------------------------------------------
     # Pension calculation (Phase 2)
     # ------------------------------------------------------------------
-    def _calculate_pension(self, emp, basic_salary, gross_pay):
+    def _calculate_pension(self, emp, basic_salary, gross_pay, pensionable_gross=None):
         """
         Calculate third-party pension contributions from PensionScheme enrollments.
         Returns dict with per-scheme breakdown and totals.
@@ -589,7 +614,7 @@ class PayrollCalculationService:
             if scheme.calculation_basis == 'basic_salary':
                 base = basic_salary
             elif scheme.calculation_basis == 'gross_pay':
-                base = gross_pay
+                base = pensionable_gross if pensionable_gross is not None else gross_pay
             elif scheme.calculation_basis == 'fixed_amount':
                 # Fixed amount: use custom_amount from enrollment or 0
                 base = ZERO
@@ -647,7 +672,7 @@ class PayrollCalculationService:
     # ------------------------------------------------------------------
     # Statutory calculations – Kenya-specific (Phase 3)
     # ------------------------------------------------------------------
-    def _calculate_statutory(self, gross_pay, basic_salary):
+    def _calculate_statutory(self, gross_pay, basic_salary, pensionable_gross=None):
         """
         Calculate NSSF, SHIF, Housing Levy.
         Returns dict with individual amounts + totals.
@@ -662,6 +687,8 @@ class PayrollCalculationService:
             'total_employer': ZERO,
         }
 
+        nssf_base = pensionable_gross if pensionable_gross is not None else gross_pay
+
         # --- NSSF (Tier I + Tier II) ---
         nssf_t1 = self.statutory_rates.get('nssf_tier1')
         nssf_t2 = self.statutory_rates.get('nssf_tier2')
@@ -672,8 +699,8 @@ class PayrollCalculationService:
         nssf_t2_employer = ZERO
 
         if nssf_t1:
-            t1_upper = nssf_t1.upper_limit or gross_pay
-            pensionable_t1 = min(gross_pay, t1_upper)
+            t1_upper = nssf_t1.upper_limit or nssf_base
+            pensionable_t1 = min(nssf_base, t1_upper)
             if nssf_t1.employee_rate:
                 nssf_t1_employee = _round(pensionable_t1 * nssf_t1.employee_rate / HUNDRED)
             elif nssf_t1.fixed_amount:
@@ -689,8 +716,8 @@ class PayrollCalculationService:
 
         if nssf_t2:
             t1_upper = (nssf_t1.upper_limit if nssf_t1 and nssf_t1.upper_limit else ZERO)
-            t2_upper = nssf_t2.upper_limit or gross_pay
-            pensionable_t2 = max(ZERO, min(gross_pay, t2_upper) - t1_upper)
+            t2_upper = nssf_t2.upper_limit or nssf_base
+            pensionable_t2 = max(ZERO, min(nssf_base, t2_upper) - t1_upper)
             if nssf_t2.employee_rate and pensionable_t2 > ZERO:
                 nssf_t2_employee = _round(pensionable_t2 * nssf_t2.employee_rate / HUNDRED)
             if nssf_t2.employer_rate and pensionable_t2 > ZERO:

@@ -1166,6 +1166,9 @@ class AttendanceRecordViewSet(viewsets.ModelViewSet):
         return earth_radius_m * c
 
     def _validate_geofence(self, method, policy_data, request):
+        if method == 'remote':
+            return None
+
         if method != 'geolocation' and not policy_data['require_geofence']:
             return None
 
@@ -2043,11 +2046,40 @@ class PayrollCalculationViewSet(viewsets.ReadOnlyModelViewSet):
         earnings = details.filter(item_type='earning')
         deductions = details.filter(item_type='deduction')
         
+        # Reconstruct reliefs applied
+        reliefs = []
+        try:
+            from workforce.models import TaxRelief
+            personal = TaxRelief.objects.filter(relief_type='personal', is_active=True).first()
+            if personal and personal.amount:
+                reliefs.append({
+                    'description': 'Personal Relief',
+                    'amount': float(personal.amount)
+                })
+            
+            shif_detail = deductions.filter(description__icontains='shif').first()
+            if shif_detail:
+                insurance = TaxRelief.objects.filter(relief_type='insurance', is_active=True).first()
+                if insurance:
+                    relief_pct = insurance.percentage or 15
+                    insurance_relief = float(shif_detail.amount) * float(relief_pct) / 100
+                    if insurance.max_amount:
+                        insurance_relief = min(insurance_relief, float(insurance.max_amount))
+                    if insurance_relief > 0:
+                        reliefs.append({
+                            'description': 'Insurance Relief',
+                            'amount': insurance_relief
+                        })
+        except Exception:
+            pass
+        
         breakdown = {
             'employee': {
                 'employee_no': calculation.employee.employee_no,
                 'name': calculation.employee.get_full_name(),
-                'department': calculation.employee.department.name
+                'department': calculation.employee.department.name if getattr(calculation.employee, 'department', None) else 'N/A',
+                'kra_pin': getattr(calculation.employee, 'tax_pin', 'N/A'),
+                'profile_image': calculation.employee.profile_picture.url if getattr(calculation.employee, 'profile_picture', None) else (calculation.employee.photo.url if getattr(calculation.employee, 'photo', None) else None),
             },
             'period': calculation.payroll_period.period_name,
             'earnings': [
@@ -2062,6 +2094,7 @@ class PayrollCalculationViewSet(viewsets.ReadOnlyModelViewSet):
                     'amount': float(d.amount)
                 } for d in deductions
             ],
+            'reliefs': reliefs,
             'summary': {
                 'gross_pay': float(calculation.gross_pay),
                 'total_deductions': float(calculation.total_deductions),

@@ -8,7 +8,8 @@ from django.db import transaction
 
 from .models import (
     Subject, Room, TimetableSlot, TimetableException, CurriculumUnit,
-    TimePeriod, WorkAllocation, TeacherAvailability, TimetableLock, TimetableVersion
+    TimePeriod, WorkAllocation, TeacherAvailability, TimetableLock, TimetableVersion,
+    GradeSubjectMapping
 )
 from .serializers import (
     SubjectSerializer, RoomSerializer, TimetableSlotSerializer,
@@ -17,7 +18,7 @@ from .serializers import (
     TeacherAvailabilitySerializer, TimetableLockSerializer,
     TimetableVersionSerializer, TimetableVersionListSerializer,
     TimetableSlotCreateSerializer, TimetableSlotDetailSerializer,
-    SchedulingResultSerializer,
+    SchedulingResultSerializer, GradeSubjectMappingSerializer,
 )
 
 
@@ -29,6 +30,32 @@ class SubjectViewSet(viewsets.ModelViewSet):
     filterset_fields = ['curriculum', 'curriculum_level', 'is_active']
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'code']
+
+
+class GradeSubjectMappingViewSet(viewsets.ModelViewSet):
+    queryset = GradeSubjectMapping.objects.select_related('grade', 'subject')
+    serializer_class = GradeSubjectMappingSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['grade', 'subject', 'is_core']
+    
+    @action(detail=False, methods=['post'], url_path='bulk-update')
+    def bulk_update(self, request):
+        grade_id = request.data.get('grade')
+        subject_ids = request.data.get('subjects', [])
+        
+        if not grade_id:
+            return Response({'error': 'grade is required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        with transaction.atomic():
+            GradeSubjectMapping.objects.filter(grade_id=grade_id).delete()
+            mappings = [
+                GradeSubjectMapping(grade_id=grade_id, subject_id=s_id)
+                for s_id in subject_ids
+            ]
+            GradeSubjectMapping.objects.bulk_create(mappings)
+            
+        return Response({'status': 'success', 'mapped_count': len(mappings)})
 
 
 class RoomViewSet(viewsets.ModelViewSet):

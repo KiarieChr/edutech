@@ -3486,6 +3486,19 @@ class GroupEarning(AuditedModel):
         limit_choices_to={'account_type': 'earning'}
     )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    calculation_method = models.CharField(
+        max_length=30,
+        choices=[
+            ('fixed', 'Fixed Amount'),
+            ('percentage_of_basic', 'Percentage of Basic'),
+        ],
+        default='fixed'
+    )
+    percentage = models.DecimalField(
+        max_digits=5, decimal_places=2,
+        null=True, blank=True,
+        help_text="Only used when calculation_method is percentage-based"
+    )
     effective_from = models.DateField()
     effective_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)

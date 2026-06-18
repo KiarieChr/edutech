@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     Subject, Room, TimetableSlot, TimetableException, CurriculumUnit,
-    TimePeriod, WorkAllocation, TeacherAvailability, TimetableLock, TimetableVersion
+    TimePeriod, WorkAllocation, TeacherAvailability, TimetableLock, TimetableVersion,
+    GradeSubjectMapping
 )
 
 
@@ -19,6 +20,21 @@ class SubjectSerializer(serializers.ModelSerializer):
             'learning_area', 'learning_area_name',
             'subject_type', 'subject_type_display', 'weekly_lessons',
             'color_hex', 'is_active', 'created_at',
+        ]
+        read_only_fields = ['created_at']
+
+
+class GradeSubjectMappingSerializer(serializers.ModelSerializer):
+    grade_name = serializers.CharField(source='grade.name', read_only=True)
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+    subject_code = serializers.CharField(source='subject.code', read_only=True)
+    
+    class Meta:
+        model = GradeSubjectMapping
+        fields = [
+            'id', 'grade', 'grade_name', 
+            'subject', 'subject_name', 'subject_code',
+            'is_core', 'created_at'
         ]
         read_only_fields = ['created_at']
 

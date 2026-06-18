@@ -112,15 +112,35 @@ class SupplierInvoiceService:
                     'credit': Decimal('0.00'),
                     'description': line.description
                 })
+            elif line.amount < 0:
+                journal_data['lines'].append({
+                    'account': line.gl_account,
+                    'debit': Decimal('0.00'),
+                    'credit': abs(line.amount),
+                    'description': line.description
+                })
         
         # Debit VAT input account (total VAT)
-        if vat_account and invoice.vat_amount > 0:
-            journal_data['lines'].append({
-                'account': vat_account,
-                'debit': invoice.vat_amount,
-                'credit': Decimal('0.00'),
-                'description': f"VAT on {invoice.invoice_number}"
-            })
+        if invoice.vat_amount != 0:
+            if not settings.vat_enabled:
+                raise ValidationError("Invoice has VAT but VAT is disabled in Finance Settings.")
+            if not vat_account:
+                raise ValidationError("Invoice has VAT but no active TAX_PAYABLE account found.")
+            
+            if invoice.vat_amount > 0:
+                journal_data['lines'].append({
+                    'account': vat_account,
+                    'debit': invoice.vat_amount,
+                    'credit': Decimal('0.00'),
+                    'description': f"VAT on {invoice.invoice_number}"
+                })
+            else:
+                journal_data['lines'].append({
+                    'account': vat_account,
+                    'debit': Decimal('0.00'),
+                    'credit': abs(invoice.vat_amount),
+                    'description': f"VAT on {invoice.invoice_number}"
+                })
         
         # Credit supplier's AP account (total) — fallback to FinanceSettings default
         ap_account = invoice.supplier.ap_account
@@ -137,12 +157,20 @@ class SupplierInvoiceService:
                 "No Trade Payables account found. "
                 "Set the supplier's AP account or configure a default in Finance Settings."
             )
-        journal_data['lines'].append({
-            'account': ap_account,
-            'debit': Decimal('0.00'),
-            'credit': invoice.total_amount,
-            'description': f"Payable to {invoice.supplier.name}"
-        })
+        if invoice.total_amount > 0:
+            journal_data['lines'].append({
+                'account': ap_account,
+                'debit': Decimal('0.00'),
+                'credit': invoice.total_amount,
+                'description': f"Payable to {invoice.supplier.name}"
+            })
+        elif invoice.total_amount < 0:
+            journal_data['lines'].append({
+                'account': ap_account,
+                'debit': abs(invoice.total_amount),
+                'credit': Decimal('0.00'),
+                'description': f"Payable to {invoice.supplier.name}"
+            })
         
         # Create and post journal entry
         entry = JournalService.create_journal_entry(journal_data, user=user)

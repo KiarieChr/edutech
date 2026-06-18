@@ -88,6 +88,37 @@ class Subject(models.Model):
         return f"{self.code} – {self.name}"
 
 
+class GradeSubjectMapping(models.Model):
+    """
+    Explicitly maps a Subject to a specific GradeStructure (e.g., Grade 7).
+    Used to filter subjects dynamically when scheduling exams or allocating teachers.
+    """
+    grade = models.ForeignKey(
+        'student_settings.GradeStructure',
+        on_delete=models.CASCADE,
+        related_name='subject_mappings'
+    )
+    subject = models.ForeignKey(
+        Subject,
+        on_delete=models.CASCADE,
+        related_name='grade_mappings'
+    )
+    is_core = models.BooleanField(
+        default=True,
+        help_text="Is this subject compulsory for this grade?"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Grade Subject Mapping'
+        verbose_name_plural = 'Grade Subject Mappings'
+        db_table = 'grade_subject_mappings'
+        unique_together = ('grade', 'subject')
+
+    def __str__(self):
+        return f"{self.grade} -> {self.subject}"
+
+
 class Room(models.Model):
     """
     A physical or virtual space where lessons take place.

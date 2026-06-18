@@ -3,6 +3,7 @@ from django.urls import path, include
 from .views import (
     SubjectViewSet, RoomViewSet, TimetableSlotViewSet,
     TimetableExceptionViewSet, CurriculumUnitViewSet,
+    GradeSubjectMappingViewSet,
     # New enhanced timetabling viewsets
     TimePeriodViewSet, WorkAllocationViewSet, TeacherAvailabilityViewSet,
     TimetableLockViewSet, TimetableVersionViewSet,
@@ -14,6 +15,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r'subjects',    SubjectViewSet,           basename='subject')
+router.register(r'grade-subjects', GradeSubjectMappingViewSet, basename='grade-subject')
 router.register(r'rooms',       RoomViewSet,              basename='room')
 router.register(r'slots',       TimetableSlotViewSet,     basename='timetable-slot')
 router.register(r'exceptions',  TimetableExceptionViewSet, basename='timetable-exception')

@@ -16,21 +16,31 @@ class ReportService:
         if end_date:
             filters &= Q(date__lte=end_date)
             
-        accounts = Account.objects.filter(is_active=True).order_by('code')
+        # Optimize: single query to get balances for all accounts
+        entries_agg = LedgerEntry.objects.filter(filters).values(
+            'account_id'
+        ).annotate(
+            sum_debit=Coalesce(Sum('debit'), Value(0, output_field=DecimalField())),
+            sum_credit=Coalesce(Sum('credit'), Value(0, output_field=DecimalField()))
+        )
+        
+        balance_map = {
+            item['account_id']: {'debit': item['sum_debit'], 'credit': item['sum_credit']}
+            for item in entries_agg
+        }
+        
+        # We need all active accounts, even those without entries, or just accounts with entries
+        # Since Trial Balance usually includes active accounts and those with balances
+        accounts = Account.objects.filter(Q(is_active=True) | Q(id__in=balance_map.keys())).order_by('code')
         report_data = []
         
         total_dr_sum = 0
         total_cr_sum = 0
         
         for account in accounts:
-            entries = LedgerEntry.objects.filter(filters, account=account)
-            agg = entries.aggregate(
-                sum_debit=Coalesce(Sum('debit'), Value(0, output_field=DecimalField())),
-                sum_credit=Coalesce(Sum('credit'), Value(0, output_field=DecimalField()))
-            )
-            
-            debit = agg['sum_debit']
-            credit = agg['sum_credit']
+            bals = balance_map.get(account.id, {'debit': 0, 'credit': 0})
+            debit = bals['debit']
+            credit = bals['credit']
             
             if debit == 0 and credit == 0:
                 continue

@@ -18,11 +18,22 @@ class FeeItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Account must be Income or Liability.")
         return value
 
+from student_settings.models import Curriculum
+
 class FeeStructureSerializer(serializers.ModelSerializer):
     items = FeeItemSerializer(many=True, read_only=True)
     academic_year_details = AcademicYearSerializer(source='academic_year', read_only=True)
     term_details = TermSerializer(source='term', read_only=True)
     grade_details = GradeStructureSerializer(source='grade', read_only=True)
+    
+    # Fix: UniqueTogetherValidator requires curriculum since it's in unique_together.
+    # Provide a default to prevent "The field curriculum is required" error.
+    curriculum = serializers.PrimaryKeyRelatedField(
+        queryset=Curriculum.objects.all(), 
+        required=False, 
+        allow_null=True, 
+        default=None
+    )
     
     # Write-only field for cloning
     clone_from_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)

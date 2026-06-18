@@ -186,10 +186,8 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
         
         job_opening.status = JobOpening.Status.PUBLISHED
         job_opening.publish_date = timezone.now().date()
-        job_opening.published_by = request.user
+        job_opening.published_by = self.request.user
         job_opening.save()
-        
-        return Response({'status': 'published'})
     
     @action(detail=True, methods=['post'], permission_classes=[IsHRManager])
     def close(self, request, pk=None):
@@ -285,7 +283,10 @@ class JobApplicationViewSet(viewsets.ModelViewSet):
             if employee.department.name != "Human Resources":
                 # Hiring managers can see applications for their job openings
                 job_openings = JobOpening.objects.filter(hiring_manager=employee)
-                queryset = queryset.filter(job_opening__in=job_openings)
+                queryset = queryset.filter(
+                    Q(job_opening__in=job_openings) |
+                    Q(interviews__interviewers=employee)
+                ).distinct()
         
         return queryset
     
