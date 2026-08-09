@@ -223,7 +223,7 @@ class SessionAttendance(models.Model):
         related_name='attendances'
     )
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.CASCADE,
         related_name='lesson_attendances'
     )

@@ -22,7 +22,7 @@ class StudentPlacement(BaseModel):
     )
 
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.PROTECT,
         related_name='placements'
     )

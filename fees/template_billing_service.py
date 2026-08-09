@@ -179,7 +179,7 @@ class TemplateBillingService:
         Returns the billing context for a student using the template system.
         Falls back to legacy BillingService if no template found.
         """
-        from accounts.models import Student
+        from student_management.models import Student
         from student_settings.models import Enrollment
 
         try:
@@ -283,7 +283,7 @@ class TemplateBillingService:
             'is_automated': bool,
         }
         """
-        from accounts.models import Student
+        from student_management.models import Student
 
         student_id = data['student_id']
         template_id = data['template_id']

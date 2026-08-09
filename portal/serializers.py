@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.db.models import Sum
-from accounts.models import Student, Parent
+from student_management.models import Student, Parent
 from fees.models import FeeInvoice, FeeInvoiceItem
 from finance.models import Receipt, ReceiptAllocation
 from result.models import TakenCourse, Result

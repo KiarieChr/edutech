@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation as DecimalException
 from datetime import date, timedelta
 
 from finance.models import Receipt, PaymentMethod, StudentPrepayment, Account, Sponsorship
-from accounts.models import Student
+from student_management.models import Student
 from fees.models import FeeInvoice
 
 

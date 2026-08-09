@@ -12,7 +12,7 @@ from django.db.models.functions import Coalesce
 from decimal import Decimal
 
 from .models import FeeInvoice
-from accounts.models import Student
+from student_management.models import Student
 
 
 class ArrearsViewSet(viewsets.ViewSet):

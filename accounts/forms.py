@@ -5,7 +5,8 @@ from django.contrib.auth.forms import (
     UserChangeForm,AuthenticationForm, PasswordChangeForm,PasswordResetForm
 )
 from course.models import Program
-from .models import User, Student, Parent, RELATION_SHIP, LEVEL, GENDERS
+from .models import User, LEVEL, GENDERS
+from student_management.models import Student, Parent, RELATION_SHIP
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError

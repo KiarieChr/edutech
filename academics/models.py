@@ -137,7 +137,7 @@ class StudentSessionEnrollment(models.Model):
     )
 
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.CASCADE,
         related_name='session_enrollments'
     )

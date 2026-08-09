@@ -7,7 +7,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.models import Student, Parent
+from student_management.models import Student, Parent
 from .models import Assignment, AssignmentSubmission
 from .serializers import (
     AssignmentListSerializer, AssignmentCreateSerializer,

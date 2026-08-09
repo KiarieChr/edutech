@@ -24,7 +24,7 @@ from reportlab.lib import colors
 
 from core.models import Session, Semester
 from course.models import Course
-from accounts.models import Student
+from student_management.models import Student
 from accounts.decorators import lecturer_required, student_required
 from .models import TakenCourse, Result
 

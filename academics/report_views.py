@@ -15,7 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import Student
+from student_management.models import Student
 from academics.models import ClassSession, StudentSessionEnrollment
 from fees.models import FeeInvoice, FeeStructure, FeeItem
 from finance.models import Receipt, StudentPrepayment

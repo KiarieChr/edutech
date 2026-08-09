@@ -346,7 +346,7 @@ class ExaminationViewSet(viewsets.ModelViewSet):
             return Response({'error': 'File is empty'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Build admission_number → student_id map
-        from accounts.models import Student
+        from student_management.models import Student
         from academics.models import StudentSessionEnrollment
 
         enrolled_students = StudentSessionEnrollment.objects.filter(

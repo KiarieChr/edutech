@@ -11,7 +11,9 @@ https://docs.djangoproject.com/en/2.2/ref/settings/
 """
 
 import os
+# pyrefly: ignore [missing-import]
 from decouple import config
+# pyrefly: ignore [missing-import]
 from django.utils.translation import gettext_lazy as _
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
@@ -28,7 +30,7 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.17','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12','api.royalsoftwares.co.ke','www.api.royalsoftwares.co.ke']
+ALLOWED_HOSTS = ["127.0.0.1","localhost",'0.0.0.0','10.22.200.145', '192.168.100.17','192.168.100.33', '172.17.232.8', '10.47.66.12', '10.31.125.12','api.royalsoftwares.co.ke','www.api.royalsoftwares.co.ke','.localhost']
 
 # change the default user models to our custom model
 AUTH_USER_MODEL = "accounts.User"
@@ -36,33 +38,38 @@ AUTH_USER_MODEL = "accounts.User"
 ENVIRONMENT = 'development'
 # Application definition
 
-DJANGO_APPS = [
-    "modeltranslation",  # Translation
-    "jet.dashboard",
-    "jet",
+# Shared Apps (Public Schema)
+SHARED_APPS = [
+    "django_tenants",
+    "tenants",  # Our new app for routing
+    
+    "modeltranslation",  # Must be before admin
+    # Core Django apps needed in public schema
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    
+    # Shared custom apps
+    "accounts.apps.AccountsConfig",
+    
+    # Third party apps needed in shared
+    "corsheaders",
+    "rest_framework",
+    "rest_framework.authtoken",
 ]
 
-
-# Third party apps
-THIRD_PARTY_APPS = [
+# Tenant Apps (Isolated Schemas)
+TENANT_APPS = [
+    "jet.dashboard",
+    "jet",
     "crispy_forms",
     "crispy_bootstrap5",
     "django_filters",
-    'rest_framework',
-    'rest_framework.authtoken',
-    'corsheaders',
-]
-
-# Custom apps
-PROJECT_APPS = [
+    
     "core.apps.CoreConfig",
-    "accounts.apps.AccountsConfig",
     "course.apps.CourseConfig",
     "result.apps.ResultConfig",
     "search.apps.SearchConfig",
@@ -80,30 +87,24 @@ PROJECT_APPS = [
     "budgets.apps.BudgetsConfig",
     "finance_reports.apps.FinanceReportsConfig",
     "academics.apps.AcademicsConfig",
-    # Academic Operations modules
     "timetable.apps.TimetableConfig",
     "scheduled_lessons.apps.ScheduledLessonsConfig",
     "lesson_sessions.apps.LessonSessionsConfig",
-    # Daily Attendance
     "attendance.apps.AttendanceConfig",
-    # Student & Parent Portal
     "portal.apps.PortalConfig",
-    # Inventory & Stores
     "inventory.apps.InventoryConfig",
-    # Examinations & Grading
     "examinations.apps.ExaminationsConfig",
-    # Assignments
     "assignments.apps.AssignmentsConfig",
-    # Procurement
     "procurement.apps.ProcurementConfig",
-    # Fleet Management
     "fleet.apps.FleetConfig",
-    # Tertiary / TVET / University
     "programmes",
 ]
 
 # Combine all apps
-INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
+INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
+
+TENANT_MODEL = "tenants.Client"
+TENANT_DOMAIN_MODEL = "tenants.Domain"
 
 AUTHENTICATION_BACKENDS = [
     'accounts.backends.EmailOrUsernameModelBackend',
@@ -112,6 +113,7 @@ AUTHENTICATION_BACKENDS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
+    'django_tenants.middleware.main.TenantMainMiddleware',
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -198,12 +200,16 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
+DATABASE_ROUTERS = (
+    'django_tenants.routers.TenantSyncRouter',
+)
+
 DATABASES = {
      'default': {     # Main database (PostgreSQL)
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'edutech',
+        'ENGINE': 'django_tenants.postgresql_backend',
+        'NAME': 'edutechdb',
         'USER': 'postgres',
-        'PASSWORD': 'Admin@2025',
+        'PASSWORD': '6820',
         'HOST': 'localhost',      # or server IP
         'PORT': '5432',
     },

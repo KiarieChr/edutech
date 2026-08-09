@@ -475,7 +475,7 @@ class SchoolCalendarViewSet(SoftDeleteViewSet):
 from rest_framework.decorators import action
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from accounts.models import Student
+from student_management.models import Student
 from .models import Enrollment
 from .serializers import (
     EnrollmentSerializer, EnrollmentCreateSerializer, EnrollmentUpdateSerializer,

@@ -9,7 +9,7 @@ from django.views.generic import CreateView
 from django_filters.views import FilterView
 
 from accounts.decorators import lecturer_required, student_required
-from accounts.models import Student
+from student_management.models import Student
 from core.models import Semester
 from course.filters import CourseAllocationFilter, ProgramFilter
 from course.forms import (

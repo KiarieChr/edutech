@@ -9,7 +9,8 @@ from django.utils import timezone
 from datetime import datetime, date as _date
 
 # Models
-from accounts.models import User, Student, Parent
+from accounts.models import User
+from student_management.models import Student, Parent
 from student_settings.models import (
     Intake, Curriculum, CurriculumLevel, GradeStructure, Stream, 
     AcademicYear, Term

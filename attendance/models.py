@@ -12,7 +12,7 @@ class DailyAttendance(models.Model):
     ]
 
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.CASCADE,
         related_name='daily_attendance',
     )

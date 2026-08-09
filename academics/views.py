@@ -468,7 +468,7 @@ class StudentSessionEnrollmentViewSet(viewsets.ModelViewSet):
             session = ClassSession.objects.get(pk=session_id)
         except ClassSession.DoesNotExist:
             return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
-        from accounts.models import Student
+        from student_management.models import Student
         from student_settings.models import Intake, Stream
         try:
             intake = Intake.objects.get(pk=intake_id)

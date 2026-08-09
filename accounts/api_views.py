@@ -25,7 +25,8 @@ from django.utils import timezone
 import calendar
 import logging
 
-from .models import User, Student, Parent, Activity
+from .models import User, Activity
+from student_management.models import Student, Parent
 from django.contrib.auth.models import Group, Permission
 from .serializers import (
     StudentSerializer,
@@ -1319,7 +1320,7 @@ class CheckGuardianEmailAPIView(APIView):
                 'message': 'Email is required.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        from accounts.models import Parent
+        from student_management.models import Parent
         parent = Parent.objects.select_related('user', 'student').filter(
             user__email__iexact=email, user__is_parent=True
         ).first()

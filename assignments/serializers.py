@@ -73,7 +73,7 @@ class SubmissionCreateSerializer(serializers.ModelSerializer):
         fields = ['id', 'assignment', 'file', 'text_response']
 
     def create(self, validated_data):
-        from accounts.models import Student
+        from student_management.models import Student
         student = Student.objects.get(student=self.context['request'].user)
         validated_data['student'] = student
         return super().create(validated_data)

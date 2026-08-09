@@ -5,7 +5,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
 from academics.models import StudentSessionEnrollment
-from accounts.models import Student
+from student_management.models import Student
 
 sid = 3
 print(f"--- Debugging Student ID: {sid} ---")

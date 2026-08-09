@@ -12,7 +12,8 @@ from course.models import (
     UploadVideo,
     CourseOffer,
 )
-from accounts.models import User, DepartmentHead
+from accounts.models import User
+from student_management.models import DepartmentHead
 from core.models import Session
 
 from .generate_fake_accounts_data import UserFactory, ProgramFactory

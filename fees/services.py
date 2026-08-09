@@ -53,7 +53,7 @@ def _get_student_intake(student_id):
     ).values_list('intake_id', flat=True).first()
     if enr:
         return enr
-    from accounts.models import Student
+    from student_management.models import Student
     return Student.objects.filter(pk=student_id).values_list('intake_id', flat=True).first()
 
 

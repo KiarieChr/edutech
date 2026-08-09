@@ -7,7 +7,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.models import Student, Parent
+from student_management.models import Student, Parent
 from fees.models import FeeInvoice
 from finance.models import Receipt, StudentPrepayment
 from result.models import TakenCourse, Result

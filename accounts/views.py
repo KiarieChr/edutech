@@ -28,7 +28,8 @@ from accounts.forms import (
     StaffAddForm,
     StudentAddForm,
 )
-from accounts.models import Parent, Student, User
+from accounts.models import User
+from student_management.models import Parent, Student
 from core.models import Semester, Session
 from course.models import Course
 from result.models import TakenCourse

@@ -10,7 +10,7 @@ from student_management.models import ClassSession
 from fees.models import FeeStructure, FeeItem
 from finance.models import Account, FinanceSettings
 from student_settings.models import AcademicYear, Term, GradeStructure, Curriculum
-from accounts.models import Student
+from student_management.models import Student
 
 def verify_auto_billing():
     print("Verifying Auto Billing...")

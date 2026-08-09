@@ -188,7 +188,7 @@ class FeeInvoice(models.Model):
     )
     
     # Denormalized fields for faster queries / history preservation
-    student = models.ForeignKey('accounts.Student', on_delete=models.PROTECT, related_name='fee_invoices')
+    student = models.ForeignKey('student_management.Student', on_delete=models.PROTECT, related_name='fee_invoices')
     class_session = models.ForeignKey('academics.ClassSession', on_delete=models.PROTECT)
     term = models.ForeignKey('student_settings.Term', on_delete=models.PROTECT)
     academic_year = models.ForeignKey('student_settings.AcademicYear', on_delete=models.PROTECT)
@@ -702,7 +702,7 @@ class StudentFeeProfile(models.Model):
     and any custom optional items the student has opted into.
     """
     student = models.OneToOneField(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.CASCADE,
         related_name='fee_profile'
     )

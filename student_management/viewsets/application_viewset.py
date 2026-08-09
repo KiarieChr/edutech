@@ -3,7 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db import transaction
 from django.utils import timezone
-from accounts.models import User, Student
+from accounts.models import User
+from student_management.models import Student
 from student_management.models.application import Application
 from student_management.models.admission import Admission
 from student_management.models.application_fee import ApplicationFeePayment
@@ -124,7 +125,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         )
 
         # 2b. Create Parent Account (or reuse existing parent)
-        from accounts.models import Parent
+        from student_management.models import Parent
         existing_parent_user_id = request.data.get('existing_parent_user_id')
 
         if existing_parent_user_id:
@@ -278,7 +279,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         from django.db.models.functions import TruncMonth
         from student_management.models.admission import Admission
         from student_settings.models import Enrollment, Intake, Stream
-        from accounts.models import Student
+        from student_management.models import Student
         from rest_framework import serializers # Helper import just in case
         
         # Parse query params

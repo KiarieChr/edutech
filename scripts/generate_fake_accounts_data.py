@@ -11,7 +11,8 @@ from django_extensions.management.commands import runscript
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from accounts.models import User, Student, Parent, DepartmentHead, LEVEL, RELATION_SHIP
+from accounts.models import User, LEVEL
+from student_management.models import Student, Parent, DepartmentHead, RELATION_SHIP
 from course.models import Program
 
 fake = Faker()

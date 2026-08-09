@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db import models
 from django.urls import reverse
 
-from accounts.models import Student
+from student_management.models import Student
 from core.models import Semester
 from course.models import Course
 

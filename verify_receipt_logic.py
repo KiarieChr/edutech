@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIRequestFactory
 from fees.receipt_views import ReceiptViewSet
 from finance.models import PaymentMethod, Receipt, ReceiptAllocation
-from accounts.models import Student
+from student_management.models import Student
 from student_settings.models import Term, AcademicYear
 from fees.models import FeeInvoice, FeeInvoiceItem, FeeItem
 

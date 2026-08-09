@@ -247,7 +247,7 @@ def log_uploadvideo_delete(sender, instance, **kwargs):
 class CourseOffer(models.Model):
     """NOTE: Only department head can offer semester courses"""
 
-    dep_head = models.ForeignKey("accounts.DepartmentHead", on_delete=models.CASCADE)
+    dep_head = models.ForeignKey("student_management.DepartmentHead", on_delete=models.CASCADE)
 
     def __str__(self):
         return str(self.dep_head)

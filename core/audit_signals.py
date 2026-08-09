@@ -21,7 +21,7 @@ TRACKED_MODELS = {
     'student_settings.Enrollment',
     'student_management.Application',
     'student_management.Admission',
-    'accounts.Student',
+    'student_management.Student',
     'fees.FeeStructure',
     'fees.FeeTemplate',
     'fees.VoteHead',

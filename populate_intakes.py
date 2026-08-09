@@ -85,7 +85,7 @@ def migrate_student_intakes():
     Optional: Migrate students from intake_year to intake.
     This is only needed if you have existing students with intake_year set.
     """
-    from accounts.models import Student
+    from student_management.models import Student
     
     print("\n" + "=" * 60)
     print("Migrating Student Intake Assignments")

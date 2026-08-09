@@ -453,7 +453,7 @@ class Receipt(models.Model):
     
     # Links
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         null=True,
         blank=True,
         on_delete=models.PROTECT,
@@ -721,7 +721,7 @@ class StudentPrepayment(models.Model):
     Created when receipt amount exceeds outstanding invoice balances.
     """
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.PROTECT,
         related_name='prepayments'
     )

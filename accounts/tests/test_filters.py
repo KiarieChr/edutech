@@ -1,6 +1,7 @@
 from django.test import TestCase
 from accounts.filters import LecturerFilter, StudentFilter
-from accounts.models import User, Student
+from accounts.models import User
+from student_management.models import Student
 from course.models import Program
 
 

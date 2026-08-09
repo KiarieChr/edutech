@@ -101,7 +101,7 @@ class AssignmentSubmission(models.Model):
         related_name='submissions',
     )
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.CASCADE,
         related_name='assignment_submissions',
     )

@@ -139,7 +139,7 @@ class PaymentTransaction(models.Model):
         null=True, blank=True, related_name='payment_transactions',
     )
     student = models.ForeignKey(
-        'accounts.Student', on_delete=models.SET_NULL,
+        'student_management.Student', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='payment_transactions',
     )
     raw_request = models.JSONField(default=dict, blank=True)

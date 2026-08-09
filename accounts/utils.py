@@ -16,7 +16,7 @@ def generate_password(length=12):
 def generate_student_id():
     # Lazy imports to avoid circular dependencies
     from student_settings.models import AdmissionConfig
-    from accounts.models import Student
+    from student_management.models import Student
     from django.utils import timezone
     import random
 

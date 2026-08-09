@@ -3,7 +3,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 
 from accounts.decorators import admin_required, lecturer_required
-from accounts.models import User, Student
+from accounts.models import User
+from student_management.models import Student
 from .forms import SessionForm, SemesterForm, NewsAndEventsForm
 from .models import NewsAndEvents, ActivityLog, Session, Semester
 

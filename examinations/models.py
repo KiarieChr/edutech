@@ -287,7 +287,7 @@ class StudentMark(BaseModel):
         Examination, on_delete=models.CASCADE, related_name='marks'
     )
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.PROTECT,
         related_name='exam_marks'
     )
@@ -385,7 +385,7 @@ class TermResult(BaseModel):
     Computed from all StudentMark records for that student + class_session.
     """
     student = models.ForeignKey(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.PROTECT,
         related_name='term_results'
     )

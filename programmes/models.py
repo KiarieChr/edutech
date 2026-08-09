@@ -280,7 +280,7 @@ class ProgrammeEnrollment(BaseModel):
     ]
 
     student = models.ForeignKey(
-        'accounts.Student', on_delete=models.CASCADE,
+        'student_management.Student', on_delete=models.CASCADE,
         related_name='programme_enrollments'
     )
     programme = models.ForeignKey(

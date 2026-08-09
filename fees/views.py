@@ -27,7 +27,7 @@ def fee_insights(request):
     try:
         from student_settings.models import Term, AcademicYear
         from academics.models import StudentSessionEnrollment, ClassSession
-        from accounts.models import Student
+        from student_management.models import Student
         
         # Get current term
         current_term = Term.objects.filter(is_current=True).select_related('academic_year').first()
@@ -505,7 +505,7 @@ class BillingViewSet(viewsets.ViewSet):
         if not query:
             return Response([])
 
-        from accounts.models import Student
+        from student_management.models import Student
         from student_settings.models import Enrollment
         from django.db.models import Q
 

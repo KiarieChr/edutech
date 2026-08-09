@@ -1,5 +1,7 @@
+# pyrefly: ignore [missing-import]
 from django.contrib import admin
-from .models import User, Student, Parent
+from .models import User
+from student_management.models import Student, Parent
 
 
 class UserAdmin(admin.ModelAdmin):

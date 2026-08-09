@@ -1,4 +1,6 @@
+# pyrefly: ignore [missing-import]
 from django.db import models
+# pyrefly: ignore [missing-import]
 from django.conf import settings
 from student_settings.models import BaseModel
 
@@ -12,7 +14,7 @@ class Admission(BaseModel):
         related_name='admission'
     )
     student = models.OneToOneField(
-        'accounts.Student',
+        'student_management.Student',
         on_delete=models.PROTECT,
         related_name='admission_record'
     )
