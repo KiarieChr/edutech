@@ -103,5 +103,5 @@ celery
 redis
 django-redis
 gunicorn
-dj-database-url
+dj-database-url<2.0
 boto3
