@@ -14,7 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(r"C:\backup\projects\edutech")
+BASE_DIR = Path(__file__).resolve().parent.parent
 BACKUP_DIR = BASE_DIR / "backups"
 
 def bootstrap_django():

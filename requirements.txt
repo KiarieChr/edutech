@@ -27,7 +27,7 @@ django-filter
 django-jet
 django-jet-reboot
 django-model-utils
-django-modeltranslation
+django-modeltranslation<0.18.0
 djangorestframework
 djangorestframework_simplejwt
 et_xmlfile
@@ -105,3 +105,4 @@ django-redis
 gunicorn
 dj-database-url<2.0
 boto3
+django-q
