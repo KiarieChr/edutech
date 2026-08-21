@@ -11,7 +11,7 @@ BACKEND_DIR="${ACADEMIA_DIR}/edutech"
 FRONTEND_DIR="${ACADEMIA_DIR}/fahari-academia-front"
 DB_NAME="edutechdb"
 DB_USER="postgres"
-DB_PASS="password" # CHANGE THIS IN PRODUCTION
+DB_PASS="Admin@2025" # CHANGE THIS IN PRODUCTION
 DOMAIN="api.royalsoftwares.co.ke"
 FRONTEND_DOMAIN="academia.royalsoftwares.co.ke"
 
