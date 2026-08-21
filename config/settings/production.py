@@ -1,6 +1,5 @@
 from .base import *
 # pyrefly: ignore [missing-import]
-import dj_database_url
 
 DEBUG = False
 
@@ -17,13 +16,17 @@ CSRF_TRUSTED_ORIGINS = [
     "https://api.royalsoftwares.co.ke",
 ]
 
-# Database (Production) - Typically injected via DATABASE_URL env var
+# Database (Production)
 DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL', default='postgres://postgres:Admin%402025@localhost:5432/edutechdb'),
-        conn_max_age=600,
-        engine='django_tenants.postgresql_backend',
-    )
+    'default': {
+        'ENGINE': 'django_tenants.postgresql_backend',
+        'NAME': config('DB_NAME', default='edutechdb'),
+        'USER': config('DB_USER', default='postgres'),
+        'PASSWORD': config('DB_PASSWORD', default='Admin@2025'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', default='5432'),
+        'CONN_MAX_AGE': 600,
+    }
 }
 
 # WhiteNoise production optimizations
