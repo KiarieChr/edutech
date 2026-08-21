@@ -41,7 +41,12 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+# Install packages one by one, ignoring failures
+while read package; do
+    if [ ! -z "$package" ]; then
+        pip install "$package" || echo "WARNING: Failed to install $package, skipping..."
+    fi
+done < requirements.txt
 
 # 4. Django migrations and static files
 echo ">>> Running initial migrations and collecting static files..."
