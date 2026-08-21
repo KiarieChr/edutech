@@ -60,8 +60,20 @@ def get_db_config(settings):
         'name': db['NAME']
     }
 
+def get_pg_bin(binary_name):
+    """Get the full path to a postgres binary on Windows, or just the name on Linux."""
+    import shutil
+    if os.name == 'nt':
+        if shutil.which(binary_name):
+            return binary_name
+        for version in ["17", "16", "15", "14", "13", "12"]:
+            path = Path(f"C:\\Program Files\\PostgreSQL\\{version}\\bin\\{binary_name}.exe")
+            if path.exists():
+                return str(path)
+    return binary_name
+
 def run_pg_dump(db_config, timestamp):
-    """Execute pg_dump with gzip compression."""
+    """Execute pg_dump."""
     BACKUP_DIR.mkdir(exist_ok=True)
     
     # Files
@@ -76,19 +88,20 @@ def run_pg_dump(db_config, timestamp):
     except Exception as e:
         logger.error(f"Failed to extract tenant schema: {e}")
     
-    # Run pg_dump (Custom format -Fc is naturally compressed and better for pg_restore)
-    # Using PGPASSWORD environment variable for authentication
-    dump_file = BACKUP_DIR / f"db_backup_{timestamp}.dump"
+    # Run pg_dump (Plain SQL format is more portable across Postgres versions)
+    dump_file = BACKUP_DIR / f"db_backup_{timestamp}.sql"
     
     env = os.environ.copy()
     env['PGPASSWORD'] = db_config['password']
     
+    pg_dump_bin = get_pg_bin("pg_dump")
+    
     pg_dump_cmd = [
-        "pg_dump",
+        pg_dump_bin,
         "-h", db_config['host'],
         "-p", db_config['port'],
         "-U", db_config['user'],
-        "-Fc", # Custom format
+        "-F", "p", # Plain text SQL format
         "-f", str(dump_file),
         db_config['name']
     ]

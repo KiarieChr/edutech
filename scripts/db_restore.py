@@ -47,7 +47,7 @@ def list_backups():
         
     backups = []
     for f in BACKUP_DIR.iterdir():
-        if f.name.endswith(".dump"):
+        if f.name.endswith(".sql") or f.name.endswith(".dump"):
             size_mb = f.stat().st_size / (1024 * 1024)
             mtime = f.stat().st_mtime
             backups.append((f, size_mb, mtime))
@@ -100,28 +100,54 @@ def drop_and_recreate_db(db_config):
         logger.error(f"Failed to drop/recreate database: {e}")
         sys.exit(1)
 
+def get_pg_bin(binary_name):
+    """Get the full path to a postgres binary on Windows, or just the name on Linux."""
+    import shutil
+    import os
+    if os.name == 'nt':
+        if shutil.which(binary_name):
+            return binary_name
+        for version in ["17", "16", "15", "14", "13", "12"]:
+            path = Path(f"C:\\Program Files\\PostgreSQL\\{version}\\bin\\{binary_name}.exe")
+            if path.exists():
+                return str(path)
+    return binary_name
+
 def run_pg_restore(db_config, dump_file):
-    """Restore the database using pg_restore."""
+    """Restore the database using pg_restore or psql."""
     env = os.environ.copy()
     env['PGPASSWORD'] = db_config['password']
     
-    pg_restore_cmd = [
-        "pg_restore",
-        "-h", db_config['host'],
-        "-p", db_config['port'],
-        "-U", db_config['user'],
-        "-d", db_config['name'],
-        "-1", # Run as a single transaction
-        str(dump_file)
-    ]
+    is_sql = str(dump_file).endswith('.sql')
     
-    logger.info(f"Starting pg_restore from {dump_file.name}...")
+    if is_sql:
+        restore_cmd = [
+            get_pg_bin("psql"),
+            "-h", db_config['host'],
+            "-p", db_config['port'],
+            "-U", db_config['user'],
+            "-d", db_config['name'],
+            "-f", str(dump_file)
+        ]
+        logger.info(f"Starting psql restore from {dump_file.name}...")
+    else:
+        restore_cmd = [
+            get_pg_bin("pg_restore"),
+            "-h", db_config['host'],
+            "-p", db_config['port'],
+            "-U", db_config['user'],
+            "-d", db_config['name'],
+            "-1", # Run as a single transaction
+            str(dump_file)
+        ]
+        logger.info(f"Starting pg_restore from {dump_file.name}...")
+        
     try:
-        # Note: pg_restore often outputs warnings to stderr even on success
-        result = subprocess.run(pg_restore_cmd, env=env, capture_output=True, text=True)
+        # Note: restores often output warnings to stderr even on success
+        result = subprocess.run(restore_cmd, env=env, capture_output=True, text=True)
         
         if result.returncode != 0:
-            logger.warning("pg_restore completed with warnings/errors:")
+            logger.warning("Restore completed with warnings/errors:")
             logger.warning(result.stderr)
         else:
             logger.info("Restore completed successfully.")

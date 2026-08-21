@@ -1,0 +1,16 @@
+[
+    {
+        "schema_name": "school1",
+        "name": "School One",
+        "domains": [
+            "school1.localhost"
+        ]
+    },
+    {
+        "schema_name": "prosper",
+        "name": "Prosper Primary School",
+        "domains": [
+            "prosper.localhost"
+        ]
+    }
+]
