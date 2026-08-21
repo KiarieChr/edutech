@@ -20,7 +20,7 @@ CSRF_TRUSTED_ORIGINS = [
 # Database (Production) - Typically injected via DATABASE_URL env var
 DATABASES = {
     'default': dj_database_url.config(
-        default=config('DATABASE_URL', default='postgres://postgres:Admin@2025@localhost:5432/edutechdb'),
+        default=config('DATABASE_URL', default='postgres://postgres:Admin%402025@localhost:5432/edutechdb'),
         conn_max_age=600,
         engine='django_tenants.postgresql_backend',
     )
