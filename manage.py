@@ -39,7 +39,9 @@ except ImportError:
 # ----------------------------------------------------
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    # Add 'apps' to Python path
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'apps'))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

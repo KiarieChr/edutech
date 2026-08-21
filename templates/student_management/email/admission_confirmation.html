@@ -4,45 +4,129 @@
 <head>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             line-height: 1.6;
-            color: #333;
+            color: #1e293b;
+            background-color: #f8fafc;
+            margin: 0;
+            padding: 40px 20px;
         }
 
         .container {
             max-width: 600px;
             margin: 0 auto;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
         }
 
         .header {
-            background-color: #4f46e5;
+            background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
             color: white;
-            padding: 15px;
+            padding: 30px;
             text-align: center;
-            border-radius: 5px 5px 0 0;
+        }
+
+        .logo-container {
+            margin-bottom: 20px;
+        }
+
+        .school-logo {
+            max-width: 100px;
+            max-height: 100px;
+            object-fit: contain;
+            border-radius: 50%;
+            background-color: white;
+            padding: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .header h2 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
         }
 
         .content {
-            padding: 20px;
+            padding: 40px 30px;
         }
 
-        .credentials {
-            background-color: #f9fafb;
-            padding: 15px;
-            border-left: 4px solid #4f46e5;
-            margin: 20px 0;
+        .content p {
+            margin: 0 0 20px 0;
+            font-size: 16px;
+            color: #475569;
+        }
+        
+        .content strong {
+            color: #0f172a;
+        }
+
+        .credentials-box {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 24px 0;
+        }
+
+        .credentials-box h3 {
+            margin: 0 0 16px 0;
+            color: #4f46e5;
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 2px solid #e0e7ff;
+            padding-bottom: 10px;
+        }
+
+        .credential-item {
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .credential-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .credential-label {
+            font-weight: 700;
+            color: #64748b;
+            width: 90px;
+            display: inline-block;
+        }
+
+        .credential-value {
+            font-weight: 600;
+            color: #0f172a;
+        }
+        
+        .credential-value a {
+            color: #4f46e5;
+            text-decoration: none;
+        }
+
+        .alert-box {
+            background-color: #fffbeb;
+            border: 1px solid #fef3c7;
+            color: #b45309;
+            padding: 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            margin-top: 30px;
         }
 
         .footer {
-            font-size: 12px;
-            color: #666;
+            font-size: 13px;
+            color: #94a3b8;
             text-align: center;
-            margin-top: 20px;
-            border-top: 1px solid #eee;
-            padding-top: 10px;
+            background-color: #f1f5f9;
+            padding: 20px;
         }
     </style>
 </head>
@@ -50,35 +134,59 @@
 <body>
     <div class="container">
         <div class="header">
-            <h2>Admission Successful!</h2>
+            {% if school_logo %}
+            <div class="logo-container">
+                <img src="{{ school_logo }}" alt="{{ school_name }} Logo" class="school-logo">
+            </div>
+            {% endif %}
+            <h2>Welcome to {{ school_name }}! 🎉</h2>
         </div>
         <div class="content">
-            <p>Dear {{ parent_name }},</p>
+            <p>Dear <strong>{{ parent_name }}</strong>,</p>
 
-            <p>We are pleased to inform you that <strong>{{ student_name }}</strong> has been successfully admitted to
-                {{ school_name }} for the {{ intake_name }}.</p>
+            <p>We are thrilled to inform you that <strong>{{ student_name }}</strong> has been successfully registered and admitted for the <strong>{{ intake_name }}</strong>.</p>
 
-            <p>You can now access the school portal to view academic progress, fee structures, and more. Below are the
-                login credentials for both the Student and Parent portals:</p>
+            <p>To help you track academic progress, view fee structures, and manage the student profile, we have set up dedicated secure portals for you.</p>
 
-            <div class="credentials">
-                <h3>Student Portal Access</h3>
-                <p><strong>URL:</strong> <a href="{{ login_url }}">{{ login_url }}</a></p>
-                <p><strong>Username:</strong> {{ student_username }}</p>
-                <p><strong>Password:</strong> {{ student_password }}</p>
+            <div class="credentials-box">
+                <h3>👨‍🎓 Student Portal Access</h3>
+                <div class="credential-item">
+                    <span class="credential-label">Portal URL:</span>
+                    <span class="credential-value"><a href="{{ login_url }}">{{ login_url }}</a></span>
+                </div>
+                <div class="credential-item">
+                    <span class="credential-label">Username:</span>
+                    <span class="credential-value">{{ student_username }}</span>
+                </div>
+                <div class="credential-item">
+                    <span class="credential-label">Password:</span>
+                    <span class="credential-value">{{ student_password }}</span>
+                </div>
             </div>
 
-            <div class="credentials">
-                <h3>Parent Portal Access</h3>
-                <p><strong>URL:</strong> <a href="{{ login_url }}">{{ login_url }}</a></p>
-                <p><strong>Username:</strong> {{ parent_username }}</p>
-                <p><strong>Password:</strong> {{ parent_password }}</p>
+            <div class="credentials-box">
+                <h3>👨‍👩‍👦 Parent Portal Access</h3>
+                <div class="credential-item">
+                    <span class="credential-label">Portal URL:</span>
+                    <span class="credential-value"><a href="{{ login_url }}">{{ login_url }}</a></span>
+                </div>
+                <div class="credential-item">
+                    <span class="credential-label">Username:</span>
+                    <span class="credential-value">{{ parent_username }}</span>
+                </div>
+                <div class="credential-item">
+                    <span class="credential-label">Password:</span>
+                    <span class="credential-value">{{ parent_password }}</span>
+                </div>
             </div>
 
-            <p>Please change these passwords upon your first login.</p>
+            <div class="alert-box">
+                🔒 For security purposes, please change these temporary passwords immediately upon your first login.
+            </div>
         </div>
         <div class="footer">
-            <p>&copy; {{ current_year }} {{ school_name }}. All rights reserved.</p>
+            &copy; {{ current_year }} {{ school_name }}. All rights reserved.<br>
+            If you have any questions, please contact the admissions office.
         </div>
     </div>
 </body>

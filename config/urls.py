@@ -14,6 +14,7 @@ from core.api_views import (
     AuditLogViewSet, SystemConfigurationViewSet, bulk_update_config,
     api_landing,
 )
+from tenants.views import TenantInfoView, DashboardStatsView
 
 admin.site.site_header = "Fahari Academia Admin"
 
@@ -56,16 +57,18 @@ urlpatterns = [
     path('api/assignments/', include('assignments.urls')),
     path('api/programmes/', include('programmes.urls')),
     path('workforce/', include('workforce.api_urls')),
+    path('api/public/tenants/', include('tenants.urls')),
+    path('api/tenant/info/', TenantInfoView.as_view(), name='tenant-info'),
+    path('api/tenant/dashboard/', DashboardStatsView.as_view(), name='tenant-dashboard'),
+    path('api/intelligence/', include('intelligence.urls')),
+    path('api/crm/', include('crm.urls')),
     #path('api/auth/', rest_framework.urls)
 ]
 
 urlpatterns += i18n_patterns(
     path("jsi18n/", JavaScriptCatalog.as_view(), name="javascript-catalog"),
     path("", include("core.urls")),
-    path("jet/", include("jet.urls", "jet")),  # Django JET URLS
-    path(
-        "jet/dashboard/", include("jet.dashboard.urls", "jet-dashboard")
-    ),  # Django JET dashboard URLS
+
     path("", include("accounts.urls")),
     path("programs/", include("course.urls")),
     path("result/", include("result.urls")),
