@@ -21,7 +21,7 @@ def bootstrap_django():
     """Bootstrap Django to use its ORM and configuration."""
     sys.path.insert(0, str(BASE_DIR))
     sys.path.insert(0, str(BASE_DIR / 'apps'))
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.production')
     import django
     django.setup()
     from django.conf import settings
