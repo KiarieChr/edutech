@@ -99,8 +99,8 @@ EOF
 # 7. Reload systemd and start services
 echo ">>> Starting backend services..."
 systemctl daemon-reload
-systemctl enable gunicorn_academia celery_academia redis-server
-systemctl restart gunicorn_academia celery_academia redis-server
+systemctl enable gunicorn_academia celery_academia #redis-server
+systemctl restart gunicorn_academia celery_academia #redis-server
 
 # 8. Nginx configuration with SSL
 echo ">>> Configuring Nginx for Backend and Frontend..."
