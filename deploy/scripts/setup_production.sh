@@ -56,7 +56,7 @@ fi
 # 4. Django migrations and static files
 echo ">>> Running initial migrations and collecting static files..."
 export DJANGO_SETTINGS_MODULE="config.settings.production"
-python manage.py collectstatic --noinput
+# python manage.py collectstatic --noinput
 python manage.py migrate_schemas --shared
 python manage.py migrate_schemas --tenant
 
