@@ -130,10 +130,27 @@ server {
 
 server {
     listen 80;
-    server_name ${FRONTEND_DOMAIN} *.${FRONTEND_DOMAIN};
+    # Nginx prefers exact matches. 'api.royalsoftwares.co.ke' will go to backend. Everything else to frontend.
+    server_name ${FRONTEND_DOMAIN} royalsoftwares.co.ke *.royalsoftwares.co.ke;
 
     root ${FRONTEND_DIR}/dist;
     index index.html;
+
+    location /api/ {
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_pass http://127.0.0.1:8000/api/;
+    }
+
+    location /static/ {
+        alias ${BACKEND_DIR}/staticfiles/;
+    }
+    
+    location /media/ {
+        alias ${BACKEND_DIR}/media/;
+    }
 
     location / {
         try_files \$uri \$uri/ /index.html;

@@ -9,11 +9,13 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://\w+\.royalsoftwares\.co\.ke$",
 ]
 CORS_ALLOWED_ORIGINS = [
-    "https://fahari.royalsoftwares.co.ke",
+    "https://academia.royalsoftwares.co.ke",
+    "https://*.royalsoftwares.co.ke"
+    
 ]
 CSRF_TRUSTED_ORIGINS = [
     "https://*.royalsoftwares.co.ke",
-    "https://api.royalsoftwares.co.ke",
+    "https://app.royalsoftwares.co.ke",
 ]
 
 # Database (Production)

@@ -13,20 +13,31 @@ class CustomTenantMiddleware(TenantMainMiddleware):
     or shown a friendly "Tenant not found" page.
     """
     
-    @staticmethod
-    def tenant_not_found(request, hostname):
+    def get_tenant(self, domain_model, hostname):
         """
-        Called when a tenant for the given hostname is not found.
-        We override this to set the tenant to the public schema instead of raising Http404.
+        Attempt to get the tenant for the domain. If it fails, fallback to the public tenant.
         """
-        public_schema_name = get_public_schema_name()
-        
-        # We need a fallback tenant and domain object representing the public schema
         try:
-            fallback_tenant = Client.objects.get(schema_name=public_schema_name)
-        except Client.DoesNotExist:
-            # If even the public schema is missing, fallback to 404
-            raise Http404("Public schema not found. Please run migrations and create the public tenant.")
+            return super().get_tenant(domain_model, hostname)
+        except domain_model.DoesNotExist:
+            # Attempt to extract subdomain from hostname (e.g., 'demo' from 'demo.localhost')
+            subdomain = hostname.split('.')[0]
             
-        request.tenant = fallback_tenant
-        request.tenant.domain_url = hostname
+            try:
+                # If a tenant exists with this schema name, return it
+                tenant = Client.objects.get(schema_name=subdomain)
+                
+                # Auto-create the domain mapping so future lookups are fast and django-tenants utils work
+                domain_model.objects.get_or_create(
+                    domain=hostname,
+                    tenant=tenant,
+                    defaults={'is_primary': False}
+                )
+                return tenant
+            except Client.DoesNotExist:
+                # Otherwise, fallback to the public tenant
+                public_schema_name = get_public_schema_name()
+                try:
+                    return Client.objects.get(schema_name=public_schema_name)
+                except Client.DoesNotExist:
+                    raise Http404("Public schema not found. Please run migrations and create the public tenant.") 

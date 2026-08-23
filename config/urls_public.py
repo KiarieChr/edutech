@@ -5,6 +5,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views import defaults as default_views
 
+# pyrefly: ignore [missing-import]
 from core.api_views import api_landing
 
 admin.site.site_header = "Fahari Academia Public Admin"
@@ -14,6 +15,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # Tenant provisioning endpoints
     path('api/public/tenants/', include('tenants.urls')),
+    # Authentication endpoints
+    path('api/', include('accounts.api_urls')),
 ]
 
 if settings.DEBUG:
