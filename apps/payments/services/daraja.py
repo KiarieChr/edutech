@@ -246,7 +246,7 @@ class DarajaService:
             logger.exception('Error processing Daraja STK callback')
             return None
 
-    # ── C2B URL Registration ─────────────────────────────────────────────────
+    # ── C2B URL Registration & Handlers ──────────────────────────────────────
 
     def register_c2b_urls(self, validation_url: str, confirmation_url: str) -> dict:
         """Register C2B validation/confirmation URLs with Safaricom."""
@@ -263,6 +263,130 @@ class DarajaService:
             timeout=30,
         )
         return resp.json()
+
+    @staticmethod
+    def handle_c2b_validation(payload: dict) -> dict:
+        """
+        Validate if the provided BillRefNumber (Account Number) is a valid
+        Student admission number.
+        Returns accepted/rejected JSON to Safaricom.
+        """
+        from student_management.models import Student
+        bill_ref = payload.get('BillRefNumber', '').strip()
+
+        if Student.objects.filter(admission_number=bill_ref).exists():
+            return {'ResultCode': 0, 'ResultDesc': 'Accepted'}
+        
+        return {'ResultCode': 1, 'ResultDesc': 'Invalid Admission Number'}
+
+    @staticmethod
+    def handle_c2b_confirmation(payload: dict):
+        """
+        Record the payment and generate a finance.models.Receipt.
+        """
+        from student_management.models import Student
+        from finance.models import Receipt, PaymentMethod
+        from finance.receipt_journal_service import ReceiptJournalService
+        from payments.services.sms import SMSService
+        import uuid
+        from django.contrib.auth import get_user_model
+        from decimal import Decimal
+        
+        bill_ref = payload.get('BillRefNumber', '').strip()
+        trans_amount = Decimal(str(payload.get('TransAmount', 0)))
+        trans_id = payload.get('TransID', '')
+        msisdn = str(payload.get('MSISDN', ''))
+        first_name = payload.get('FirstName', '')
+        last_name = payload.get('LastName', '')
+        trans_time = payload.get('TransTime', '') # YYYYMMDDHHMMSS
+        
+        try:
+            date_received = datetime.strptime(trans_time, '%Y%m%d%H%M%S').date()
+        except ValueError:
+            date_received = timezone.now().date()
+
+        student = Student.objects.filter(admission_number=bill_ref).first()
+        if not student:
+            logger.error('Daraja C2B Confirmation: Student not found for %s', bill_ref)
+            return
+
+        # 1. Log Payment Transaction
+        txn = PaymentTransaction.objects.create(
+            provider='daraja',
+            reference=f'C2B-{trans_id}',
+            external_reference=trans_id,
+            phone=msisdn,
+            amount=trans_amount,
+            status='success',
+            description=f'M-Pesa C2B Payment by {first_name} {last_name}',
+            student=student,
+            raw_response=payload,
+        )
+        
+        # 2. Generate Receipt
+        try:
+            payment_method = PaymentMethod.objects.filter(name__icontains='M-Pesa').first()
+            if not payment_method:
+                payment_method = PaymentMethod.objects.first()
+                
+            admin_user = get_user_model().objects.filter(is_superuser=True).first()
+            
+            receipt = Receipt.objects.create(
+                receipt_number=f"RCT-{uuid.uuid4().hex[:8].upper()}",
+                receipt_type='STUDENT_FEE',
+                payer_name=f"{first_name} {last_name}",
+                student=student,
+                payment_method=payment_method,
+                amount_received=trans_amount,
+                received_date=date_received,
+                received_by=admin_user,
+                reference=trans_id,
+                status='ISSUED',
+                is_posted=False 
+            )
+            
+            # Allocation logic
+            from fees.models import FeeInvoice
+            invoices = FeeInvoice.objects.filter(student=student, balance__gt=0).order_by('date_issued')
+            
+            total_allocated = Decimal('0.00')
+            for inv in invoices:
+                if total_allocated >= trans_amount:
+                    break
+                remaining_payment = trans_amount - total_allocated
+                allocate = min(remaining_payment, inv.balance)
+                
+                inv.paid_amount += allocate
+                inv.update_payment_status()
+                total_allocated += allocate
+                
+            receipt.amount_allocated = total_allocated
+            receipt.is_posted = True
+            receipt.posted_at = timezone.now()
+            receipt.save()
+            
+            # Create journal entry
+            ReceiptJournalService.create_receipt_journal_entry(receipt, user=admin_user)
+            
+            # 3. Send SMS
+            try:
+                sms = SMSService()
+                # Safely get student name
+                student_name = student.student.get_full_name() if hasattr(student.student, 'get_full_name') else 'the student'
+                msg = f"Dear {first_name}, we have received your payment of KES {trans_amount} for {student_name} (Adm: {bill_ref}). Receipt No: {receipt.receipt_number}."
+                sms.send(msisdn, msg)
+                
+                # Send to parents if communications active
+                for parent in student.parents.all():
+                    if parent.phone and parent.phone != msisdn:
+                        sms.send(parent.phone, msg)
+            except Exception as e:
+                logger.error('Failed to send SMS: %s', str(e))
+                
+        except Exception as exc:
+            logger.exception('Daraja C2B Confirmation processing failed')
+            txn.failure_reason = str(exc)
+            txn.save()
 
     # ── B2C (Disbursement) ───────────────────────────────────────────────────
 

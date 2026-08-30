@@ -142,6 +142,30 @@ def daraja_register_urls(request):
         return Response({'error': str(exc)}, status=400)
 
 
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def daraja_c2b_validation(request):
+    """
+    Validation URL for M-Pesa C2B.
+    Called by Safaricom before completing a payment to verify the account number.
+    """
+    result = DarajaService.handle_c2b_validation(request.data)
+    return Response(result)
+
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def daraja_c2b_confirmation(request):
+    """
+    Confirmation URL for M-Pesa C2B.
+    Called by Safaricom when payment is completed.
+    """
+    DarajaService.handle_c2b_confirmation(request.data)
+    return Response({'ResultCode': 0, 'ResultDesc': 'Accepted'})
+
+
 # ─── Paystack ────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])

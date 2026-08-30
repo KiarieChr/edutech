@@ -24,26 +24,35 @@ class Command(BaseCommand):
                     'curriculum': cbc,
                     'scale_type': 'rubric',
                     'max_mark': 100,
-                    'pass_mark': 25,
-                    'description': 'Competency-Based Curriculum rubric grading (EE, ME, AE, BE)',
+                    'pass_mark': 41, # Usually ME2 is passing
+                    'description': 'Competency-Based Curriculum rubric grading (EE, ME, AE, BE - 8 Levels)',
                 }
             )
+            
+            # Always update levels to ensure we have the latest 8-level rubric
+            GradingLevel.objects.filter(scale=scale).delete()
+            
+            levels = [
+                ('EE1', 'Exceeding Expectations 1', 90, 100, 8, 1, '#15803d'),
+                ('EE2', 'Exceeding Expectations 2', 75, 89, 7, 2, '#22c55e'),
+                ('ME1', 'Meeting Expectations 1', 58, 74, 6, 3, '#1d4ed8'),
+                ('ME2', 'Meeting Expectations 2', 41, 57, 5, 4, '#3b82f6'),
+                ('AE1', 'Approaching Expectations 1', 31, 40, 4, 5, '#ea580c'),
+                ('AE2', 'Approaching Expectations 2', 21, 30, 3, 6, '#f59e0b'),
+                ('BE1', 'Below Expectations 1', 11, 20, 2, 7, '#b91c1c'),
+                ('BE2', 'Below Expectations 2', 0, 10, 1, 8, '#ef4444'),
+            ]
+            for grade, label, min_m, max_m, pts, order, color in levels:
+                GradingLevel.objects.create(
+                    scale=scale, grade=grade, label=label,
+                    min_mark=min_m, max_mark=max_m, points=pts,
+                    order=order, color_hex=color,
+                )
+            
             if created:
-                levels = [
-                    ('EE', 'Exceeding Expectations', 75, 100, 4, 1, '#22c55e'),
-                    ('ME', 'Meeting Expectations', 50, 74, 3, 2, '#3b82f6'),
-                    ('AE', 'Approaching Expectations', 25, 49, 2, 3, '#f59e0b'),
-                    ('BE', 'Below Expectations', 0, 24, 1, 4, '#ef4444'),
-                ]
-                for grade, label, min_m, max_m, pts, order, color in levels:
-                    GradingLevel.objects.create(
-                        scale=scale, grade=grade, label=label,
-                        min_mark=min_m, max_mark=max_m, points=pts,
-                        order=order, color_hex=color,
-                    )
                 self.stdout.write(f'  Created CBC Rubric scale with {len(levels)} levels')
             else:
-                self.stdout.write('  CBC Rubric scale already exists')
+                self.stdout.write(f'  Updated CBC Rubric scale with {len(levels)} levels')
 
         # --- 8-4-4 Points Grading ---
         k844 = Curriculum.objects.filter(code='844').first()
@@ -96,24 +105,34 @@ class Command(BaseCommand):
                     'curriculum': kcbc,
                     'scale_type': 'rubric',
                     'max_mark': 100,
-                    'pass_mark': 25,
-                    'description': 'Kenya CBC rubric grading',
+                    'pass_mark': 41,
+                    'description': 'Kenya CBC rubric grading (8 Levels)',
                 }
             )
+            
+            GradingLevel.objects.filter(scale=scale).delete()
+            
+            levels = [
+                ('EE1', 'Exceeding Expectations 1', 90, 100, 8, 1, '#15803d'),
+                ('EE2', 'Exceeding Expectations 2', 75, 89, 7, 2, '#22c55e'),
+                ('ME1', 'Meeting Expectations 1', 58, 74, 6, 3, '#1d4ed8'),
+                ('ME2', 'Meeting Expectations 2', 41, 57, 5, 4, '#3b82f6'),
+                ('AE1', 'Approaching Expectations 1', 31, 40, 4, 5, '#ea580c'),
+                ('AE2', 'Approaching Expectations 2', 21, 30, 3, 6, '#f59e0b'),
+                ('BE1', 'Below Expectations 1', 11, 20, 2, 7, '#b91c1c'),
+                ('BE2', 'Below Expectations 2', 0, 10, 1, 8, '#ef4444'),
+            ]
+            for grade, label, min_m, max_m, pts, order, color in levels:
+                GradingLevel.objects.create(
+                    scale=scale, grade=grade, label=label,
+                    min_mark=min_m, max_mark=max_m, points=pts,
+                    order=order, color_hex=color,
+                )
+            
             if created:
-                levels = [
-                    ('EE', 'Exceeding Expectations', 75, 100, 4, 1, '#22c55e'),
-                    ('ME', 'Meeting Expectations', 50, 74, 3, 2, '#3b82f6'),
-                    ('AE', 'Approaching Expectations', 25, 49, 2, 3, '#f59e0b'),
-                    ('BE', 'Below Expectations', 0, 24, 1, 4, '#ef4444'),
-                ]
-                for grade, label, min_m, max_m, pts, order, color in levels:
-                    GradingLevel.objects.create(
-                        scale=scale, grade=grade, label=label,
-                        min_mark=min_m, max_mark=max_m, points=pts,
-                        order=order, color_hex=color,
-                    )
                 self.stdout.write(f'  Created K-CBC Rubric scale with {len(levels)} levels')
+            else:
+                self.stdout.write(f'  Updated K-CBC Rubric scale with {len(levels)} levels')
 
     def _seed_assessment_types(self):
         # --- CBC Assessment Types ---

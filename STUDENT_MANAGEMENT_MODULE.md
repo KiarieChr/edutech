@@ -10,24 +10,6 @@ The Student Management module handles the complete lifecycle of student admissio
 
 ## Architecture
 
-```
-student_management/
-├── models/
-│   ├── application.py      # Application model (pre-admission)
-│   ├── admission.py        # Admission record model
-│   ├── class_session.py    # StudentPlacement model
-│   └── completion.py       # Completion tracking
-├── serializers/
-│   ├── application.py      # Application serializer
-│   ├── admission.py        # Admission serializer
-│   └── class_session.py    # StudentPlacement serializer
-├── viewsets/
-│   ├── application_viewset.py   # Application CRUD + admit action
-│   ├── admission_viewset.py     # Admission CRUD
-│   ├── class_session_viewset.py # Placement CRUD
-│   └── import_viewset.py        # Bulk student import
-└── urls.py
-```
 
 ---
 

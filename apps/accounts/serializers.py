@@ -268,6 +268,7 @@ class UserSerializer(serializers.ModelSerializer):
         source='groups', write_only=True, required=False
     )
     permissions = serializers.SerializerMethodField(read_only=True)
+    enabled_modules = serializers.SerializerMethodField(read_only=True)
     employee_id = serializers.IntegerField(source='employee_profile.id', read_only=True, allow_null=True)
     employee_no = serializers.CharField(source='employee_profile.employee_no', read_only=True, allow_null=True)
     employee_name = serializers.SerializerMethodField(read_only=True)
@@ -279,10 +280,18 @@ class UserSerializer(serializers.ModelSerializer):
             'is_student', 'is_lecturer', 'is_parent', 'is_dep_head', 'is_superuser',
             'is_active', 'gender', 'phone', 'address', 'picture', 'picture_url',
             'is_first_login', 'date_joined', 'last_login', 'profile_url', 'role',
-            'tenants', 'groups', 'group_ids', 'permissions', 'session_timeout',
+            'tenants', 'groups', 'group_ids', 'permissions', 'enabled_modules', 'session_timeout',
             'employee_id', 'employee_no', 'employee_name'
         ]
         read_only_fields = ['date_joined', 'last_login', 'is_superuser']
+
+    def get_enabled_modules(self, obj):
+        try:
+            from core.models import InstitutionProfile
+            profile = InstitutionProfile.get_instance()
+            return profile.enabled_modules or []
+        except Exception:
+            return []
 
     def get_employee_name(self, obj):
         if hasattr(obj, 'employee_profile') and obj.employee_profile:

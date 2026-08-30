@@ -18,8 +18,11 @@ class AdmissionViewSet(viewsets.ModelViewSet):
     ).prefetch_related('student__enrollments__grade', 'student__enrollments__stream').all()
     serializer_class = AdmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [filters.SearchFilter]
+    from django_filters.rest_framework import DjangoFilterBackend
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
     search_fields = ['admission_number', 'student__student__first_name', 'student__student__last_name']
+    # remove the entry type and status
+    filterset_fields = ['campus', 'student__student__gender']
 
     def perform_create(self, serializer):
         # Enforce application-first gate if enabled

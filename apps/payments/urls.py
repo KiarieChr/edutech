@@ -24,6 +24,8 @@ urlpatterns = [
     path("mpesa/stk-query/", views.daraja_stk_query, name="daraja_stk_query"),
     path("mpesa/callback/", views.daraja_callback, name="daraja_callback"),
     path("mpesa/register-urls/", views.daraja_register_urls, name="daraja_register_urls"),
+    path("mpesa/c2b/validate/", views.daraja_c2b_validation, name="daraja_c2b_validation"),
+    path("mpesa/c2b/confirm/", views.daraja_c2b_confirmation, name="daraja_c2b_confirmation"),
 
     # ── Paystack ─────────────────────────────────────────────────────────────
     path("paystack/initialize/", views.paystack_initialize, name="paystack_initialize"),

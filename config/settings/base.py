@@ -10,6 +10,7 @@ AUTH_USER_MODEL = "accounts.User"
 
 # Application definition
 SHARED_APPS = [
+    "daphne",
     "django_tenants",
     "tenants",
     "modeltranslation",
@@ -24,6 +25,7 @@ SHARED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "django_q",
+    "channels",
 ]
 
 TENANT_APPS = [
@@ -92,6 +94,16 @@ MIDDLEWARE = [
 ROOT_URLCONF = "config.urls"
 PUBLIC_SCHEMA_URLCONF = "config.urls_public"
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(config("REDIS_URL", default="redis://127.0.0.1:6379/1"))],
+        },
+    },
+}
 
 TEMPLATES = [
     {

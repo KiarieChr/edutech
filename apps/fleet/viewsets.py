@@ -17,6 +17,10 @@ from .models import (
     VehicleAssignment,
     VehicleDocument,
     VehicleExpense,
+    TransportStop,
+    RouteStop,
+    TransportRoute,
+    TransportSchedule,
 )
 from .serializers import (
     DriverProfileSerializer,
@@ -27,6 +31,10 @@ from .serializers import (
     VehicleDocumentSerializer,
     VehicleExpenseSerializer,
     VehicleSerializer,
+    TransportStopSerializer,
+    RouteStopSerializer,
+    TransportRouteSerializer,
+    TransportScheduleSerializer,
 )
 
 
@@ -38,6 +46,35 @@ class VehicleViewSet(viewsets.ModelViewSet):
     filterset_fields = ['vehicle_type', 'status', 'campus', 'assigned_department']
     search_fields = ['registration_number', 'make', 'model']
     ordering = ['registration_number']
+
+    @action(detail=True, methods=['post'])
+    def update_location(self, request, pk=None):
+        vehicle = self.get_object()
+        latitude = request.data.get('latitude')
+        longitude = request.data.get('longitude')
+        speed = request.data.get('speed', 0)
+        
+        if latitude is None or longitude is None:
+            return Response({'error': 'latitude and longitude are required'}, status=400)
+            
+        # Broadcast to Websocket group
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'bus_{vehicle.id}_location',
+                {
+                    'type': 'location_update',
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'speed': speed,
+                    'timestamp': timezone.now().isoformat()
+                }
+            )
+            
+        return Response({'status': 'Location updated'})
 
     @action(detail=False, methods=['get'])
     def dashboard_summary(self, request):
@@ -78,6 +115,135 @@ class VehicleViewSet(viewsets.ModelViewSet):
             'month_total_cost': fuel_cost + maintenance_cost + expense_cost,
             'due_service': due_service,
             'expiring_documents_30_days': expiring_docs,
+        })
+
+    @action(detail=False, methods=['get'])
+    def financial_analytics(self, request):
+        from dateutil.relativedelta import relativedelta
+        from django.db.models.functions import TruncMonth
+        # pyrefly: ignore [missing-import]
+        from finance.models import ReceiptAllocation
+
+        months = int(request.query_params.get('months', 6))
+        end_date = timezone.now().date()
+        start_date = (end_date - relativedelta(months=months - 1)).replace(day=1)
+
+        # 1. Income (Receipt allocations for transport)
+        allocations = ReceiptAllocation.objects.filter(
+            allocated_at__date__gte=start_date,
+            allocated_at__date__lte=end_date,
+        ).filter(
+            Q(invoice_item__fee_item__name__icontains='transport') |
+            Q(invoice_item__vote_head__name__icontains='transport')
+        ).annotate(
+            month=TruncMonth('allocated_at')
+        ).values('month').annotate(
+            total_income=Sum('amount')
+        ).order_by('month')
+
+        # 2. Fuel Expenses
+        fuel_logs = FuelLog.objects.filter(
+            filled_at__date__gte=start_date,
+            filled_at__date__lte=end_date
+        ).annotate(
+            month=TruncMonth('filled_at')
+        ).values('month').annotate(
+            total_cost=Sum('total_cost')
+        ).order_by('month')
+
+        # 3. Maintenance Expenses
+        maintenance_logs = MaintenanceRecord.objects.filter(
+            completed_date__gte=start_date,
+            completed_date__lte=end_date
+        ).annotate(
+            month=TruncMonth('completed_date')
+        ).values('month').annotate(
+            total_cost=Sum('total_cost')
+        ).order_by('month')
+
+        # 4. Other Expenses
+        other_expenses = VehicleExpense.objects.filter(
+            expense_date__gte=start_date,
+            expense_date__lte=end_date
+        ).annotate(
+            month=TruncMonth('expense_date')
+        ).values('month').annotate(
+            total_cost=Sum('amount')
+        ).order_by('month')
+
+        # Merge data into a continuous timeline
+        results_by_month = {}
+        curr = start_date
+        while curr <= end_date:
+            month_str = curr.strftime('%Y-%m')
+            month_label = curr.strftime('%b %Y')
+            results_by_month[month_str] = {
+                'month_str': month_str,
+                'month_label': month_label,
+                'income': 0,
+                'fuel': 0,
+                'maintenance': 0,
+                'other': 0,
+            }
+            curr += relativedelta(months=1)
+
+        for a in allocations:
+            if a['month']:
+                m = a['month'].strftime('%Y-%m')
+                if m in results_by_month:
+                    results_by_month[m]['income'] = float(a['total_income'] or 0)
+                    
+        for f in fuel_logs:
+            if f['month']:
+                m = f['month'].strftime('%Y-%m')
+                if m in results_by_month:
+                    results_by_month[m]['fuel'] = float(f['total_cost'] or 0)
+
+        for m in maintenance_logs:
+            if m['month']:
+                month_str = m['month'].strftime('%Y-%m')
+                if month_str in results_by_month:
+                    results_by_month[month_str]['maintenance'] = float(m['total_cost'] or 0)
+
+        for o in other_expenses:
+            if o['month']:
+                m = o['month'].strftime('%Y-%m')
+                if m in results_by_month:
+                    results_by_month[m]['other'] = float(o['total_cost'] or 0)
+        
+        # Calculate totals
+        total_income = sum(item['income'] for item in results_by_month.values())
+        total_fuel = sum(item['fuel'] for item in results_by_month.values())
+        total_maintenance = sum(item['maintenance'] for item in results_by_month.values())
+        total_other = sum(item['other'] for item in results_by_month.values())
+        total_expense = total_fuel + total_maintenance + total_other
+
+        # KPI: Cost per km
+        total_distance = TripLog.objects.filter(
+            departure_time__date__gte=start_date,
+            departure_time__date__lte=end_date,
+            status=TripLog.Status.COMPLETED
+        ).aggregate(total=Sum('distance_km'))['total'] or 0
+
+        avg_cost_per_km = 0
+        if total_distance > 0:
+            avg_cost_per_km = float(total_expense) / float(total_distance)
+
+        data = list(results_by_month.values())
+        data.sort(key=lambda x: x['month_str'])
+
+        return Response({
+            'chart_data': data,
+            'summary': {
+                'total_income': total_income,
+                'total_expense': total_expense,
+                'net_profit': total_income - total_expense,
+                'total_fuel': total_fuel,
+                'total_maintenance': total_maintenance,
+                'total_other': total_other,
+                'total_distance_km': float(total_distance),
+                'avg_cost_per_km': round(avg_cost_per_km, 2)
+            }
         })
 
 
@@ -145,3 +311,36 @@ class VehicleDocumentViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['vehicle', 'document_type']
     ordering = ['-expiry_date']
+
+
+class TransportStopViewSet(viewsets.ModelViewSet):
+    queryset = TransportStop.objects.all()
+    serializer_class = TransportStopSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = ['name']
+
+
+class RouteStopViewSet(viewsets.ModelViewSet):
+    queryset = RouteStop.objects.select_related('route', 'stop').all()
+    serializer_class = RouteStopSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['route', 'stop']
+
+
+class TransportRouteViewSet(viewsets.ModelViewSet):
+    queryset = TransportRoute.objects.prefetch_related('route_stops__stop').all()
+    serializer_class = TransportRouteSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = ['name']
+
+
+class TransportScheduleViewSet(viewsets.ModelViewSet):
+    queryset = TransportSchedule.objects.select_related('route', 'vehicle', 'driver__employee').all()
+    serializer_class = TransportScheduleSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['route', 'vehicle', 'driver', 'is_active']
+    ordering = ['departure_time']

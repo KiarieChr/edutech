@@ -8,12 +8,16 @@ from django.conf.urls.i18n import i18n_patterns
 from django.views.i18n import JavaScriptCatalog
 from rest_framework.routers import DefaultRouter
 
+# pyrefly: ignore [missing-import]
 from core.api_views import (
     list_commands, run_command,
     institution_profile_detail, institution_profile_update,
     AuditLogViewSet, SystemConfigurationViewSet, bulk_update_config,
+    system_subscription_detail, system_subscription_update,
+    SMSPricingBandViewSet,
     api_landing,
 )
+# pyrefly: ignore [missing-import]
 from tenants.views import TenantInfoView, DashboardStatsView
 
 admin.site.site_header = "Fahari Academia Admin"
@@ -22,15 +26,19 @@ admin.site.site_header = "Fahari Academia Admin"
 core_router = DefaultRouter()
 core_router.register(r'audit-logs', AuditLogViewSet, basename='audit-log')
 core_router.register(r'system-config', SystemConfigurationViewSet, basename='system-config')
+core_router.register(r'sms-pricing-bands', SMSPricingBandViewSet, basename='sms-pricing-band')
 
 urlpatterns = [
     path("", api_landing, name="api-landing"),
+    path("api/", api_landing, name="api-landing-root"),
     path("admin/", admin.site.urls),
     path("i18n/", include("django.conf.urls.i18n")),
     path('api/system/commands/', list_commands, name='list-commands'),
     path('api/system/run-command/', run_command, name='run-command'),
     path('api/institution/', institution_profile_detail, name='institution-profile'),
     path('api/institution/update/', institution_profile_update, name='institution-profile-update'),
+    path('api/system-subscription/', system_subscription_detail, name='system-subscription'),
+    path('api/system-subscription/update/', system_subscription_update, name='system-subscription-update'),
     path('api/', include(core_router.urls)),
     path('api/system-config/bulk-update/', bulk_update_config, name='system-config-bulk-update'),
     path('api/settings/', include('student_settings.urls')),

@@ -76,12 +76,15 @@ class CreateTenantView(APIView):
                     email = admin_data.get('email')
                     password = admin_data.get('password')
                     if email and password:
-                        user = User.objects.create_superuser(
+                        user = User.objects.create_user(
                             email=email,
                             password=password,
                             first_name=admin_data.get('first_name', ''),
                             last_name=admin_data.get('last_name', '')
                         )
+                        user.is_staff = True
+                        user.is_superuser = False
+                        user.save()
 
             return Response({
                 "message": "Institution created successfully",

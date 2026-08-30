@@ -9,6 +9,10 @@ from .models import (
     VehicleAssignment,
     VehicleDocument,
     VehicleExpense,
+    TransportStop,
+    RouteStop,
+    TransportRoute,
+    TransportSchedule,
 )
 
 
@@ -75,4 +79,36 @@ class VehicleDocumentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VehicleDocument
+        fields = '__all__'
+
+
+class TransportStopSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TransportStop
+        fields = '__all__'
+
+
+class RouteStopSerializer(serializers.ModelSerializer):
+    stop_name = serializers.CharField(source='stop.name', read_only=True)
+
+    class Meta:
+        model = RouteStop
+        fields = '__all__'
+
+
+class TransportRouteSerializer(serializers.ModelSerializer):
+    route_stops = RouteStopSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TransportRoute
+        fields = '__all__'
+
+
+class TransportScheduleSerializer(serializers.ModelSerializer):
+    route_name = serializers.CharField(source='route.name', read_only=True)
+    vehicle_registration = serializers.CharField(source='vehicle.registration_number', read_only=True)
+    driver_name = serializers.CharField(source='driver.employee.get_full_name', read_only=True)
+
+    class Meta:
+        model = TransportSchedule
         fields = '__all__'

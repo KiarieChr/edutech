@@ -289,6 +289,46 @@ def bulk_update_config(request):
     return Response({'updated': updated, 'count': len(updated)})
 
 
+# ---------------------------------------------------------------------------
+# Billing Settings: SystemSubscription & SMSPricingBand
+# ---------------------------------------------------------------------------
+
+from .models import SystemSubscription, SMSPricingBand
+
+class SystemSubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemSubscription
+        fields = '__all__'
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def system_subscription_detail(request):
+    subscription = SystemSubscription.get_instance()
+    serializer = SystemSubscriptionSerializer(subscription)
+    return Response(serializer.data)
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAdminUser])
+def system_subscription_update(request):
+    subscription = SystemSubscription.get_instance()
+    partial = request.method == 'PATCH'
+    serializer = SystemSubscriptionSerializer(subscription, data=request.data, partial=partial)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+class SMSPricingBandSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SMSPricingBand
+        fields = '__all__'
+
+class SMSPricingBandViewSet(ModelViewSet):
+    serializer_class = SMSPricingBandSerializer
+    permission_classes = [IsAdminUser]
+    queryset = SMSPricingBand.objects.all()
+    ordering = ['max_sms']
+
+
 # ─── API Landing page ─────────────────────────────────────────────────────────
 
 API_MODULES = [

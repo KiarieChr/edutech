@@ -302,3 +302,64 @@ class VehicleDocument(FleetAuditedModel):
 
     def __str__(self):
         return f'{self.vehicle.registration_number} {self.document_type}'
+
+
+class TransportStop(FleetAuditedModel):
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    radius_meters = models.PositiveIntegerField(default=50)
+    
+    class Meta:
+        ordering = ['name']
+        
+    def __str__(self):
+        return self.name
+
+
+class TransportRoute(FleetAuditedModel):
+    name = models.CharField(max_length=200, unique=True)
+    description = models.TextField(blank=True)
+    total_distance_km = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    stops = models.ManyToManyField(TransportStop, through='RouteStop', related_name='routes')
+    
+    class Meta:
+        ordering = ['name']
+        
+    def __str__(self):
+        return self.name
+
+
+class RouteStop(FleetAuditedModel):
+    route = models.ForeignKey(TransportRoute, on_delete=models.CASCADE, related_name='route_stops')
+    stop = models.ForeignKey(TransportStop, on_delete=models.CASCADE, related_name='stop_routes')
+    stop_sequence = models.PositiveIntegerField()
+    estimated_minutes_from_start = models.PositiveIntegerField(default=0)
+    
+    class Meta:
+        ordering = ['route', 'stop_sequence']
+        unique_together = ('route', 'stop_sequence')
+        
+    def __str__(self):
+        return f'{self.route.name} - {self.stop.name} (Stop {self.stop_sequence})'
+
+
+class TransportSchedule(FleetAuditedModel):
+    route = models.ForeignKey(TransportRoute, on_delete=models.PROTECT, related_name='schedules')
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name='schedules')
+    driver = models.ForeignKey(DriverProfile, on_delete=models.PROTECT, related_name='schedules')
+    
+    departure_time = models.TimeField()
+    estimated_duration_minutes = models.PositiveIntegerField(default=60)
+    
+    # Days of week bitmask or flags could be added here for recurring schedules, 
+    # but for simplicity we assume daily or we could add boolean flags:
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    
+    class Meta:
+        ordering = ['departure_time']
+        
+    def __str__(self):
+        return f'{self.route.name} at {self.departure_time}'

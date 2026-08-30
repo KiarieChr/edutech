@@ -24,7 +24,7 @@ INSTITUTION_LEVEL_MAP = {
 from core.permissions import ModuleRequiredPermission
 
 class ClassSessionViewSet(viewsets.ModelViewSet):
-    queryset = ClassSession.objects.all()
+    queryset = ClassSession.objects.all().order_by('-id')
     serializer_class = ClassSessionSerializer
     permission_classes = [permissions.IsAuthenticated, ModuleRequiredPermission]
     required_module = 'academics'

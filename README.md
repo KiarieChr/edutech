@@ -10,7 +10,7 @@ _Documentation is under development_
 
 Let's enhance the project by contributing! 👩‍💻👩‍💻
 
-<img width="1440" alt="screenshot" src="https://github.com/user-attachments/assets/08644f49-6ae0-4695-86cc-afe331c6f61a">
+
 
 ## Current features
 

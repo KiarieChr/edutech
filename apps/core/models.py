@@ -188,6 +188,16 @@ class InstitutionProfile(models.Model):
         help_text='Official school stamp / seal — overlaid on the signature block'
     )
 
+    # Document Templates
+    offer_letter_template = models.TextField(
+        blank=True, null=True,
+        help_text='HTML template for the conditional offer letter body'
+    )
+    admission_letter_template = models.TextField(
+        blank=True, null=True,
+        help_text='HTML template for the official admission letter body'
+    )
+
     class Meta:
         verbose_name = _('Institution Profile')
         verbose_name_plural = _('Institution Profile')
@@ -371,3 +381,95 @@ class SystemConfiguration(models.Model):
         elif self.value_type == self.ValueType.JSON:
             return json.loads(v) if v else {}
         return v
+
+# ============================================================================
+# SUBSCRIPTION & BILLING
+# ============================================================================
+
+class SystemSubscription(models.Model):
+    """
+    Manages the tenant's system subscription details (base package).
+    Accessible by the tenant, and viewable globally.
+    """
+    package_name = models.CharField(max_length=100, default="Standard Package")
+    monthly_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    ai_markup_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, help_text="Markup applied to raw AI cost (e.g. 20.00 for 20%)")
+    
+    # AP Account where the bill should be posted in the tenant's books
+    ap_account = models.ForeignKey(
+        'finance.Account',
+        on_delete=models.SET_NULL,
+        limit_choices_to={'type': 'LIABILITY'},
+        null=True,
+        blank=True,
+        help_text="Accounts Payable account to credit when generating platform bills"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'core_system_subscription'
+        verbose_name = 'System Subscription'
+        verbose_name_plural = 'System Subscriptions'
+
+    def __str__(self):
+        return f"{self.package_name} - {self.monthly_fee} KES/mo"
+
+    def save(self, *args, **kwargs):
+        # Enforce singleton per tenant
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_instance(cls):
+        obj, _ = cls.objects.get_or_create(
+            pk=1,
+            defaults={'package_name': 'Standard Package', 'monthly_fee': 5000.00}
+        )
+        return obj
+
+
+class SMSPricingBand(models.Model):
+    """
+    Tiered pricing bands for SMS usage. 
+    E.g. max_sms=4000, fixed_price=2000.00
+    If usage > 4000, it checks the next band.
+    """
+    name = models.CharField(max_length=100, help_text="e.g. Band A (up to 4000 SMS)")
+    max_sms = models.PositiveIntegerField(help_text="Maximum SMS count for this band (inclusive)")
+    fixed_price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Flat cost for this band")
+    
+    class Meta:
+        db_table = 'core_sms_pricing_band'
+        ordering = ['max_sms']
+        verbose_name = 'SMS Pricing Band'
+        verbose_name_plural = 'SMS Pricing Bands'
+
+    def __str__(self):
+        return f"{self.name}: <= {self.max_sms} SMS = {self.fixed_price} KES"
+
+
+class BillingCycle(models.Model):
+    """
+    Tracks billing generation to prevent duplicate invoices for the same month.
+    """
+    month = models.DateField(unique=True, help_text="First day of the billed month (e.g., 2026-08-01)")
+    invoice_generated = models.BooleanField(default=False)
+    generated_at = models.DateTimeField(null=True, blank=True)
+    invoice = models.ForeignKey(
+        'payables.SupplierInvoice', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
+    
+    class Meta:
+        db_table = 'core_billing_cycle'
+        ordering = ['-month']
+        verbose_name = 'Billing Cycle'
+        verbose_name_plural = 'Billing Cycles'
+
+    def __str__(self):
+        return f"Billing Cycle: {self.month.strftime('%B %Y')}"
+

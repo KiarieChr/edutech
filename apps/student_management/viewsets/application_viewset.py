@@ -84,107 +84,113 @@ class ApplicationViewSet(viewsets.ModelViewSet):
                 )
         # ─────────────────────────────────────────────────────────────────────
 
-        # --- Admission Number Generation (Step 0) ---
-        from accounts.utils import generate_student_id
-        
-        adm_no = request.data.get('admission_number')
-        if not adm_no:
-            adm_no = generate_student_id()
-        
-        # 1. Create User
-        username = f"{application.first_name.lower()}.{application.last_name.lower()}"
-        # Ensure unique username
-        counter = 1
-        original_username = username
-        while User.objects.filter(username=username).exists():
-            username = f"{original_username}{counter}"
-            counter += 1
-            
-        # Password is the admission number as requested
-        password = adm_no
-        
-        # Create user manually to skip signal logic that overwrites credentials
-        user = User(
-            username=username,
-            email=application.email,
-            first_name=application.first_name,
-            last_name=application.last_name,
-            gender=application.gender,
-            is_student=True
-        )
-        user.set_password(password)
-        user._skip_account_creation_signal = True # Flag for signal to skip
-        user.save()
-        if hasattr(request, 'tenant') and request.tenant.schema_name != 'public':
-            user.tenants.add(request.tenant)
-        
-        # 2. Create Student   
-        student = Student.objects.create(
-            student=user,
-            admission_number=adm_no,
-            date_of_birth=application.date_of_birth,
-            # Copy other demographics
-        )
-
-        # 2b. Create Parent Account (or reuse existing parent)
-        from student_management.models import Parent
-        existing_parent_user_id = request.data.get('existing_parent_user_id')
-
-        if existing_parent_user_id:
-            # Reuse an existing parent user account (e.g. sibling scenario)
-            try:
-                parent_user = User.objects.get(id=existing_parent_user_id, is_parent=True)
-            except User.DoesNotExist:
-                raise serializers.ValidationError('Specified parent user account not found.')
-
-            Parent.objects.create(
-                user=parent_user,
-                student=student,
-                first_name=parent_user.first_name,
-                last_name=parent_user.last_name,
-                phone=application.phone_number,
-                email=application.email,
-                relation_ship=application.guardian_relationship or '',
-            )
-            parent_username = parent_user.username
-            parent_password = None  # Existing account, no new password
+        # --- Handle Existing Admission (Waitlist scenario) ---
+        if hasattr(application, 'admission'):
+            admission = application.admission
+            student = admission.student
+            adm_no = admission.admission_number
         else:
-            # Create a new parent user account
-            parent_username = f"P{adm_no}"
-            parent_password = parent_username  # Initial password
-
-            parent_user = User(
-                username=parent_username,
-                email=application.email,  # Guardian email
-                first_name=application.guardian_name.split()[0] if application.guardian_name else "Parent",
-                last_name=" ".join(application.guardian_name.split()[1:]) if application.guardian_name and len(application.guardian_name.split()) > 1 else "",
-                is_parent=True
+            # --- Admission Number Generation (Step 0) ---
+            from accounts.utils import generate_student_id
+            
+            adm_no = request.data.get('admission_number')
+            if not adm_no:
+                adm_no = generate_student_id()
+            
+            # 1. Create User
+            username = f"{application.first_name.lower()}.{application.last_name.lower()}"
+            # Ensure unique username
+            counter = 1
+            original_username = username
+            while User.objects.filter(username=username).exists():
+                username = f"{original_username}{counter}"
+                counter += 1
+                
+            # Password is the admission number as requested
+            password = adm_no
+            
+            # Create user manually to skip signal logic that overwrites credentials
+            user = User(
+                username=username,
+                email=application.email,
+                first_name=application.first_name,
+                last_name=application.last_name,
+                gender=application.gender,
+                is_student=True
             )
-            parent_user.set_password(parent_password)
-            parent_user._skip_account_creation_signal = True
-            parent_user.save()
+            user.set_password(password)
+            user._skip_account_creation_signal = True # Flag for signal to skip
+            user.save()
             if hasattr(request, 'tenant') and request.tenant.schema_name != 'public':
-                parent_user.tenants.add(request.tenant)
-
-            Parent.objects.create(
-                user=parent_user,
-                student=student,
-                first_name=parent_user.first_name,
-                last_name=parent_user.last_name,
-                phone=application.phone_number,
-                email=application.email
+                user.tenants.add(request.tenant)
+            
+            # 2. Create Student   
+            student = Student.objects.create(
+                student=user,
+                admission_number=adm_no,
+                date_of_birth=application.date_of_birth,
+                # Copy other demographics
             )
-        
-        # 3. Create Admission Record
-        Admission.objects.create(
-            application=application,
-            student=student,
-            admission_number=adm_no,
-            admission_date=timezone.now().date(),
-            campus=application.campus,
-            admitted_by=request.user,
-            created_by=request.user
-        )
+
+            # 2b. Create Parent Account (or reuse existing parent)
+            from student_management.models import Parent
+            existing_parent_user_id = request.data.get('existing_parent_user_id')
+
+            if existing_parent_user_id:
+                # Reuse an existing parent user account (e.g. sibling scenario)
+                try:
+                    parent_user = User.objects.get(id=existing_parent_user_id, is_parent=True)
+                except User.DoesNotExist:
+                    raise serializers.ValidationError('Specified parent user account not found.')
+
+                Parent.objects.create(
+                    user=parent_user,
+                    student=student,
+                    first_name=parent_user.first_name,
+                    last_name=parent_user.last_name,
+                    phone=application.phone_number,
+                    email=application.email,
+                    relation_ship=application.guardian_relationship or '',
+                )
+                parent_username = parent_user.username
+                parent_password = None  # Existing account, no new password
+            else:
+                # Create a new parent user account
+                parent_username = f"P{adm_no}"
+                parent_password = parent_username  # Initial password
+
+                parent_user = User(
+                    username=parent_username,
+                    email=application.email,  # Guardian email
+                    first_name=application.guardian_name.split()[0] if application.guardian_name else "Parent",
+                    last_name=" ".join(application.guardian_name.split()[1:]) if application.guardian_name and len(application.guardian_name.split()) > 1 else "",
+                    is_parent=True
+                )
+                parent_user.set_password(parent_password)
+                parent_user._skip_account_creation_signal = True
+                parent_user.save()
+                if hasattr(request, 'tenant') and request.tenant.schema_name != 'public':
+                    parent_user.tenants.add(request.tenant)
+
+                Parent.objects.create(
+                    user=parent_user,
+                    student=student,
+                    first_name=parent_user.first_name,
+                    last_name=parent_user.last_name,
+                    phone=application.phone_number,
+                    email=application.email
+                )
+            
+            # 3. Create Admission Record
+            admission = Admission.objects.create(
+                application=application,
+                student=student,
+                admission_number=adm_no,
+                admission_date=timezone.now().date(),
+                campus=application.campus,
+                admitted_by=request.user,
+                created_by=request.user
+            )
         
         # 4. Create Class Session (Reporting/Admission)
         from student_settings.models import AcademicYear, Term, GradeStructure, Stream
@@ -210,22 +216,24 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         stream_id = request.data.get('stream_id')
         stream = Stream.objects.get(id=stream_id) if stream_id else None
         
-        Enrollment.objects.create(
+        Enrollment.objects.get_or_create(
             student=student,
-            intake=application.intake,
             academic_year=academic_year,
             term=term,
-            curriculum=application.applying_for_curriculum,
-            curriculum_level=getattr(application.applying_for_grade, 'curriculum_level', None),
-            grade=grade,
-            stream=stream,
-            campus=application.campus,
-            enrollment_type='new_admission',
-            status='active',
-            is_active=True,
-            enrollment_date=timezone.now().date(),
-            created_by=request.user,
-            updated_by=request.user
+            defaults={
+                'intake': application.intake,
+                'curriculum': application.applying_for_curriculum,
+                'curriculum_level': getattr(application.applying_for_grade, 'curriculum_level', None),
+                'grade': grade,
+                'stream': stream,
+                'campus': application.campus,
+                'enrollment_type': 'new_admission',
+                'status': 'active',
+                'is_active': True,
+                'enrollment_date': timezone.now().date(),
+                'created_by': request.user,
+                'updated_by': request.user
+            }
         )
         
         # Auto-enroll student into active academics session

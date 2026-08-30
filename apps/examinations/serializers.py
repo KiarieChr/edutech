@@ -28,13 +28,14 @@ class GradingScaleListSerializer(serializers.ModelSerializer):
     curriculum_code = serializers.CharField(source='curriculum.code', read_only=True)
     level_name = serializers.CharField(source='curriculum_level.name', read_only=True, default=None)
     level_count = serializers.IntegerField(source='levels.count', read_only=True)
+    levels = GradingLevelSerializer(many=True, read_only=True)
 
     class Meta:
         model = GradingScale
         fields = [
             'id', 'name', 'code', 'curriculum', 'curriculum_name', 'curriculum_code',
             'curriculum_level', 'level_name', 'scale_type', 'max_mark',
-            'pass_mark', 'is_active', 'level_count'
+            'pass_mark', 'is_active', 'level_count', 'levels'
         ]
 
 
