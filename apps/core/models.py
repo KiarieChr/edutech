@@ -473,3 +473,34 @@ class BillingCycle(models.Model):
     def __str__(self):
         return f"Billing Cycle: {self.month.strftime('%B %Y')}"
 
+import uuid
+
+class SyncOutbox(models.Model):
+    sequence_number = models.BigAutoField(primary_key=True)
+    event_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    sync_id = models.UUIDField(db_index=True)
+    model_name = models.CharField(max_length=150)
+    action = models.CharField(max_length=20)
+    payload = models.JSONField(null=True, blank=True)
+    source_installation_id = models.CharField(max_length=100, db_index=True)
+    schema_version = models.CharField(max_length=10, default='1.0')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['sequence_number']
+
+
+class SyncProcessedEvent(models.Model):
+    event_id = models.UUIDField(primary_key=True)
+    applied_at = models.DateTimeField(auto_now_add=True)
+
+class SyncErrorLog(models.Model):
+    event_id = models.UUIDField(db_index=True)
+    sync_id = models.UUIDField(null=True, blank=True)
+    installation_id = models.CharField(max_length=100)
+    model_name = models.CharField(max_length=150)
+    action = models.CharField(max_length=20)
+    error_code = models.CharField(max_length=50)
+    error_message = models.TextField()
+    payload = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

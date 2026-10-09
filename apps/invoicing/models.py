@@ -31,6 +31,10 @@ class Invoice(models.Model):
     
     # Recurring flag
     is_recurring = models.BooleanField(default=False)
+    
+    # Admission flag
+    is_admission_fee = models.BooleanField(default=False, help_text="True if this is an admission fee invoice")
+    academic_year = models.ForeignKey('student_settings.AcademicYear', on_delete=models.SET_NULL, null=True, blank=True)
 
     subtotal = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
     tax_total = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)

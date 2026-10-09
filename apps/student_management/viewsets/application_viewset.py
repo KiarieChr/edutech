@@ -256,6 +256,20 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         application.application_status = 'accepted'
         application.save()
         
+        # 5.5 Generate Admission Invoice if requested
+        apply_admission_fees = request.data.get('apply_admission_fees', False)
+        admission_fee_template_id = request.data.get('admission_fee_template_id')
+        if apply_admission_fees:
+            try:
+                from finance.services.admission_billing import generate_student_admission_invoice
+                inv, msg = generate_student_admission_invoice(student, template_id=admission_fee_template_id)
+                if not inv:
+                    print(f"Admission Invoice skipped: {msg}")
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Admissions Billing Warning: Failed to generate admission invoice for {student.id}: {e}")
+        
         # 6. Send Admission Email
         try:
             from student_management.utils.email_utils import send_admission_email

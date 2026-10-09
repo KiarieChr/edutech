@@ -31,6 +31,25 @@ class SubjectViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'code']
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        class_session_id = self.request.query_params.get('class_session')
+        
+        if class_session_id:
+            try:
+                from apps.academics.models import ClassSession
+                session = ClassSession.objects.get(id=class_session_id)
+                if session.grade_id:
+                    # Filter subjects that are mapped to this class's grade
+                    mapped_subject_ids = GradeSubjectMapping.objects.filter(
+                        grade_id=session.grade_id
+                    ).values_list('subject_id', flat=True)
+                    queryset = queryset.filter(id__in=mapped_subject_ids)
+            except Exception:
+                pass
+                
+        return queryset
+
 
 class GradeSubjectMappingViewSet(viewsets.ModelViewSet):
     queryset = GradeSubjectMapping.objects.select_related('grade', 'subject')
@@ -212,6 +231,16 @@ class TimePeriodViewSet(viewsets.ModelViewSet):
         periods = self.queryset.filter(is_schedulable=True, is_active=True)
         serializer = self.get_serializer(periods, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def seed(self, request):
+        """Run the setup_periods management command."""
+        from django.core.management import call_command
+        try:
+            call_command('setup_periods')
+            return Response({'status': 'success', 'message': 'Periods seeded successfully.'})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class WorkAllocationViewSet(viewsets.ModelViewSet):

@@ -191,5 +191,15 @@ class SponsorshipViewSet(viewsets.ModelViewSet):
             return [AllowAny()]
         return [IsAuthenticated()]
 
-   
+from .models import AdmissionFeeTemplate, AdmissionFeeItem
+from .serializers import AdmissionFeeTemplateSerializer, AdmissionFeeItemSerializer
 
+class AdmissionFeeTemplateViewSet(viewsets.ModelViewSet):
+    queryset = AdmissionFeeTemplate.objects.all().prefetch_related('items', 'items__account')
+    serializer_class = AdmissionFeeTemplateSerializer
+    pagination_class = None
+
+class AdmissionFeeItemViewSet(viewsets.ModelViewSet):
+    queryset = AdmissionFeeItem.objects.all().select_related('account')
+    serializer_class = AdmissionFeeItemSerializer
+    pagination_class = None

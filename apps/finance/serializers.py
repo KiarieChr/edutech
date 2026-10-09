@@ -88,3 +88,21 @@ class SponsorshipSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
+
+from .models import AdmissionFeeTemplate, AdmissionFeeItem
+
+class AdmissionFeeItemSerializer(serializers.ModelSerializer):
+    account_name = serializers.CharField(source='account.name', read_only=True)
+    
+    class Meta:
+        model = AdmissionFeeItem
+        fields = ['id', 'template', 'account', 'account_name', 'name', 'amount', 'is_refundable', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+class AdmissionFeeTemplateSerializer(serializers.ModelSerializer):
+    items = AdmissionFeeItemSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = AdmissionFeeTemplate
+        fields = ['id', 'name', 'is_active', 'items', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']

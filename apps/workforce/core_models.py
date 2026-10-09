@@ -18,6 +18,8 @@ User = get_user_model()
 
 class TimestampedModel(models.Model):
     """Abstract model with created and updated timestamps"""
+    import uuid
+    sync_id = models.UUIDField(default=uuid.uuid4, editable=False, null=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

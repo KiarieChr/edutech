@@ -62,6 +62,7 @@ urlpatterns = [
     path('api/lesson-sessions/', include('lesson_sessions.urls')),
     path('api/attendance/', include('attendance.urls')),
     path('api/portal/', include('portal.urls')),
+    path('api/transport/', include('transport.urls')),
     path('api/assignments/', include('assignments.urls')),
     path('api/programmes/', include('programmes.urls')),
     path('workforce/', include('workforce.api_urls')),
@@ -70,6 +71,7 @@ urlpatterns = [
     path('api/tenant/dashboard/', DashboardStatsView.as_view(), name='tenant-dashboard'),
     path('api/intelligence/', include('intelligence.urls')),
     path('api/crm/', include('crm.urls')),
+    path('api/sync/v1/push/', __import__('core.sync_api').sync_api.SyncPushAPIView.as_view(), name='sync-push'),
     #path('api/auth/', rest_framework.urls)
 ]
 

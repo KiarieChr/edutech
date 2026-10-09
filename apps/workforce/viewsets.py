@@ -546,6 +546,33 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                         )
                         success_count += 1
                     
+                    # Ensure User account exists
+                    if not employee.user and employee.official_email:
+                        from django.contrib.auth import get_user_model
+                        User = get_user_model()
+                        email = employee.official_email
+                        username = email.split('@')[0]
+                        base_username = username
+                        counter = 1
+                        while User.objects.filter(username=username).exists():
+                            username = f"{base_username}{counter}"
+                            counter += 1
+                        
+                        user = User.objects.create_user(
+                            username=username,
+                            email=email,
+                            first_name=employee.first_name,
+                            last_name=employee.last_name,
+                            password=employee.employee_no  # Default password
+                        )
+                        if employee.employee_category == 'teaching':
+                            user.is_lecturer = True
+                        else:
+                            user.is_staff = True
+                        user.save()
+                        employee.user = user
+                        employee.save()
+                    
                     # Get or create Job Title and assign
                     if job_title_name:
                         jt_name = str(job_title_name).strip()
@@ -3477,6 +3504,16 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
     """
     permission_classes = [AllowAny]  # Change to IsAuthenticated in production
     
+    @action(detail=False, methods=['post'], url_path='seed')
+    def seed(self, request):
+        """Run the seed_payroll_data management command."""
+        from django.core.management import call_command
+        try:
+            call_command('seed_payroll_data')
+            return Response({'status': 'success', 'message': 'Payroll data seeded successfully.'})
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+            
     # ==========================================
     # PAYROLL CYCLE CONFIGURATION
     # ==========================================

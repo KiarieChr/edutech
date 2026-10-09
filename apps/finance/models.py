@@ -782,3 +782,32 @@ class StudentPrepayment(models.Model):
             self.is_fully_used = True
         
         super().save(*args, **kwargs)
+
+class AdmissionFeeTemplate(models.Model):
+    name = models.CharField(max_length=255, default='Standard Admission Fees')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('Admission Fee Template')
+        verbose_name_plural = _('Admission Fee Templates')
+
+    def __str__(self):
+        return self.name
+
+class AdmissionFeeItem(models.Model):
+    template = models.ForeignKey(AdmissionFeeTemplate, on_delete=models.CASCADE, related_name='items')
+    account = models.ForeignKey(Account, on_delete=models.RESTRICT, limit_choices_to={'type': AccountType.INCOME, 'is_student_related': True})
+    name = models.CharField(max_length=255, help_text="e.g. Registration Fee, Caution Money")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    is_refundable = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('Admission Fee Item')
+        verbose_name_plural = _('Admission Fee Items')
+
+    def __str__(self):
+        return f"{self.name} - {self.amount}"
