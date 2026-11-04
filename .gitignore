@@ -150,3 +150,10 @@ media/result_sheet/*
 # Custom
 dump.rdb
 *.DS_Store
+
+# Database backups and manifests (never commit or push backups to git)
+backups/
+*.dump
+*.sql
+*.tar.gz
+tenants_manifest_*.json
