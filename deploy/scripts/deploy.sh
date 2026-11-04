@@ -3,6 +3,7 @@
 # deploy.sh
 # Automated deployment script for Academia on Linux production.
 # Handles git syncing, merge conflicts, unrelated histories, database backup,
+# Python venv modernization (Python >= 3.10 required for tinyhtml5/weasyprint),
 # migrations, frontend build, permissions, and service restarts.
 # ==============================================================================
 
@@ -33,6 +34,54 @@ echo "=============================================="
 echo " Starting Academia Deployment..."
 echo " Environment: ${DJANGO_SETTINGS_MODULE}"
 echo "=============================================="
+
+# Helper function to ensure venv uses a modern Python version (>= 3.10)
+ensure_modern_venv() {
+    cd "${BACKEND_DIR}"
+    local NEED_REBUILD=false
+
+    if [ ! -d "venv" ] || [ ! -f "venv/bin/python" ]; then
+        NEED_REBUILD=true
+    else
+        local VENV_PY_VER
+        VENV_PY_VER=$(venv/bin/python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
+        local VENV_MAJOR=$(echo "$VENV_PY_VER" | cut -d'.' -f1)
+        local VENV_MINOR=$(echo "$VENV_PY_VER" | cut -d'.' -f2)
+        if [ "$VENV_MAJOR" -lt 3 ] || [ "$VENV_MINOR" -lt 10 ]; then
+            echo ">>> Detected Python ${VENV_PY_VER} in venv (< 3.10). Modern Python is required for tinyhtml5/weasyprint."
+            NEED_REBUILD=true
+        fi
+    fi
+
+    if [ "$NEED_REBUILD" = true ]; then
+        local CHOSEN_PY=""
+        for cand in python3.12 python3.11 python3.14 python3.10 python3; do
+            if command -v "$cand" &>/dev/null; then
+                local PY_VER
+                PY_VER=$("$cand" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
+                local MAJ=$(echo "$PY_VER" | cut -d'.' -f1)
+                local MIN=$(echo "$PY_VER" | cut -d'.' -f2)
+                if [ "$MAJ" -eq 3 ] && [ "$MIN" -ge 10 ]; then
+                    CHOSEN_PY="$cand"
+                    break
+                fi
+            fi
+        done
+
+        if [ -z "$CHOSEN_PY" ]; then
+            echo "Error: No Python >= 3.10 found. Please install python3.11 or python3.12 on the server."
+            return 1
+        fi
+
+        echo ">>> Building new virtual environment with ${CHOSEN_PY} ($($CHOSEN_PY --version))..."
+        if [ -d "venv" ]; then
+            rm -rf venv_py38_backup 2>/dev/null || true
+            mv venv venv_py38_backup
+        fi
+        "$CHOSEN_PY" -m venv venv
+        venv/bin/python -m pip install --upgrade pip setuptools wheel
+    fi
+}
 
 # Helper function to reliably sync git repositories without halting on conflicts or unrelated histories
 sync_repository() {
@@ -80,7 +129,14 @@ sync_repository() {
     fi
 }
 
-# 1. Pre-deployment Database Backup
+# 1. Pull latest code with conflict & unrelated history handling
+sync_repository "${BACKEND_DIR}" "Backend (edutech)" "main"
+sync_repository "${FRONTEND_DIR}" "Frontend (fahari-academia-front)" "main"
+
+# 2. Ensure modern Python virtualenv (>= 3.10)
+ensure_modern_venv
+
+# 3. Pre-deployment Database Backup
 echo ">>> Taking pre-deployment database backup..."
 cd "${BACKEND_DIR}"
 if [ -d "venv" ]; then
@@ -90,17 +146,11 @@ if [ -d "venv" ]; then
     fi
 fi
 
-# 2. Pull latest code with conflict & unrelated history handling
-sync_repository "${BACKEND_DIR}" "Backend (edutech)" "main"
-sync_repository "${FRONTEND_DIR}" "Frontend (fahari-academia-front)" "main"
-
-# 3. Dependency updates
+# 4. Dependency updates
 echo ">>> Updating backend dependencies..."
 cd "${BACKEND_DIR}"
-if [ -d "venv" ]; then
-    venv/bin/pip install --no-input -r requirements.txt
-    venv/bin/pip install --no-input gunicorn
-fi
+venv/bin/pip install --no-input -r requirements.txt
+venv/bin/pip install --no-input gunicorn
 
 echo ">>> Updating frontend dependencies..."
 cd "${FRONTEND_DIR}"
@@ -108,37 +158,37 @@ if [ -f "package.json" ]; then
     npm install --no-audit --prefer-offline || npm install
 fi
 
-# 4. Database migrations
+# 5. Database migrations
 echo ">>> Running Django tenant migrations (migrate_schemas)..."
 cd "${BACKEND_DIR}"
 venv/bin/python manage.py migrate_schemas --noinput
 
-# 5. Frontend build
+# 6. Frontend build
 echo ">>> Building frontend (npm run build)..."
 cd "${FRONTEND_DIR}"
 npm run build
 
-# 6. Static files collection
+# 7. Static files collection
 echo ">>> Collecting backend static files..."
 cd "${BACKEND_DIR}"
 venv/bin/python manage.py collectstatic --noinput
 
-# 7. Normalize permissions
+# 8. Normalize permissions
 echo ">>> Setting permissions for www-data..."
 chown -R www-data:www-data "${BACKEND_DIR}/media" "${BACKEND_DIR}/staticfiles" "${FRONTEND_DIR}/dist"
 chmod -R 775 "${BACKEND_DIR}/media" "${BACKEND_DIR}/staticfiles" "${FRONTEND_DIR}/dist"
 
-# 8. Service restart
+# 9. Service restart
 echo ">>> Restarting services..."
 systemctl restart gunicorn_academia
 if systemctl list-unit-files | grep -q "celery_academia.service"; then
     systemctl restart celery_academia || true
 fi
 
-# 9. Reload Nginx
+# 10. Reload Nginx
 nginx -t && systemctl reload nginx
 
-# 10. Clear Redis cache
+# 11. Clear Redis cache
 if command -v redis-cli &> /dev/null; then
     echo ">>> Clearing Redis cache..."
     redis-cli flushall || true
