@@ -18,7 +18,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://app.royalsoftwares.co.ke",
 ]
 
-# Database (Production)
+# Database (Production - PostgreSQL 16 on port 5433)
 DATABASES = {
     'default': {
         'ENGINE': 'django_tenants.postgresql_backend',
@@ -26,7 +26,7 @@ DATABASES = {
         'USER': config('DB_USER', default='postgres'),
         'PASSWORD': config('DB_PASSWORD', default='Admin@2025'),
         'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+        'PORT': config('DB_PORT', default='5433'),
         'CONN_MAX_AGE': 600,
     }
 }

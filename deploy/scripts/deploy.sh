@@ -23,12 +23,14 @@ if [ -f "${BACKEND_DIR}/.env" ]; then
     set +a
 fi
 
-# Ensure PostgreSQL credentials are in the environment for pg_dump/psql
+# Ensure PostgreSQL credentials and port are in the environment for pg_dump/psql
 if [ -n "${DB_PASSWORD:-}" ]; then
     export PGPASSWORD="${DB_PASSWORD}"
 elif [ -n "${POSTGRES_PASSWORD:-}" ]; then
     export PGPASSWORD="${POSTGRES_PASSWORD}"
 fi
+export PGPORT="${DB_PORT:-5433}"
+export PGHOST="${DB_HOST:-localhost}"
 
 echo "=============================================="
 echo " Starting Academia Deployment..."
