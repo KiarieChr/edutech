@@ -31,7 +31,8 @@ BACKUP_DIR="${ACADEMIA_DIR}/db_migration_pg12_to_pg16"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 mkdir -p "${BACKUP_DIR}"
-chmod 770 "${BACKUP_DIR}"
+chown -R postgres:postgres "${BACKUP_DIR}"
+chmod 777 "${BACKUP_DIR}"
 
 # 1. Source .env if available
 DB_NAME="edutechdb"
@@ -84,9 +85,10 @@ fi
 # 3. Dump Globals (roles, passwords) from PG 12 and sync to PG 16
 log_info ">>> Exporting roles and global objects from PG 12..."
 GLOBALS_FILE="${BACKUP_DIR}/globals_pg12_${TIMESTAMP}.sql"
-sudo -u postgres "$PG_DUMPALL_BIN" -p 5432 --globals-only > "${GLOBALS_FILE}" || {
+sudo -u postgres "$PG_DUMPALL_BIN" -p 5432 --globals-only -f "${GLOBALS_FILE}" || {
     log_warn "pg_dumpall globals export had warnings. Continuing..."
 }
+chmod 664 "${GLOBALS_FILE}" 2>/dev/null || true
 
 log_info ">>> Applying database roles to PG 16 (port 5433)..."
 sudo -u postgres psql -p 5433 -f "${GLOBALS_FILE}" || {
@@ -171,3 +173,4 @@ log_info " 2. (Optional) Once verified, stop PostgreSQL 12 to free RAM:"
 log_info "    sudo systemctl stop postgresql@12-main"
 log_info "    sudo systemctl disable postgresql@12-main"
 log_info "=========================================================="
+
