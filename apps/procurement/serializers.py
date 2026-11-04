@@ -294,6 +294,7 @@ class PurchaseOrderLineSerializer(serializers.ModelSerializer):
 
 class PurchaseOrderListSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
     created_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
     receipt_percentage = serializers.FloatField(read_only=True)
@@ -302,7 +303,7 @@ class PurchaseOrderListSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseOrder
         fields = [
-            'id', 'po_number', 'supplier', 'supplier_name', 'status',
+            'id', 'po_number', 'supplier', 'supplier_name', 'campus', 'campus_name', 'status',
             'order_date', 'expected_delivery_date',
             'total_amount', 'currency', 'receipt_percentage', 'line_count',
             'approved_by', 'approved_by_name', 'approved_at',
@@ -322,6 +323,7 @@ class PurchaseOrderListSerializer(serializers.ModelSerializer):
 class PurchaseOrderDetailSerializer(serializers.ModelSerializer):
     lines = PurchaseOrderLineSerializer(many=True, read_only=True)
     supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
     created_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
     requisition_number = serializers.CharField(
@@ -338,7 +340,7 @@ class PurchaseOrderDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseOrder
         fields = [
-            'id', 'po_number', 'supplier', 'supplier_name', 'status',
+            'id', 'po_number', 'supplier', 'supplier_name', 'campus', 'campus_name', 'status',
             'order_date', 'expected_delivery_date', 'delivery_address',
             'currency', 'subtotal', 'vat_amount', 'total_amount',
             'payment_terms', 'budget_line',
@@ -364,7 +366,7 @@ class PurchaseOrderCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseOrder
         fields = [
-            'supplier', 'requisition', 'rfq', 'quotation', 'contract',
+            'supplier', 'campus', 'requisition', 'rfq', 'quotation', 'contract',
             'order_date', 'expected_delivery_date', 'delivery_address',
             'currency', 'payment_terms', 'budget_line', 'notes', 'lines',
         ]

@@ -56,6 +56,8 @@ class Ed25519SyncAuthentication(BaseAuthentication):
         except Exception as e:
             raise AuthenticationFailed({"code": "SIGNATURE_ERROR", "message": "Error verifying signature"})
 
+
+
         installation.last_seen_at = timezone.now()
         installation.save(update_fields=['last_seen_at'])
 

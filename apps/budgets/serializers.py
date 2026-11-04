@@ -66,6 +66,7 @@ class BudgetLineSerializer(serializers.ModelSerializer):
 
 
 class BudgetListSerializer(serializers.ModelSerializer):
+    campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
     line_count = serializers.SerializerMethodField()
     total_budget = serializers.SerializerMethodField()
     total_spent = serializers.SerializerMethodField()
@@ -73,8 +74,8 @@ class BudgetListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Budget
         fields = [
-            'id', 'name', 'fiscal_year', 'start_date', 'end_date',
-            'description', 'is_active', 'line_count',
+            'id', 'name', 'fiscal_year', 'campus', 'campus_name', 'start_date', 'end_date',
+            'description', 'status', 'is_active', 'line_count',
             'total_budget', 'total_spent', 'created_at'
         ]
 
@@ -92,13 +93,14 @@ class BudgetListSerializer(serializers.ModelSerializer):
 
 
 class BudgetDetailSerializer(serializers.ModelSerializer):
-    lines = BudgetLineSerializer(many=True)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
+    lines = BudgetLineSerializer(many=True, required=False)
 
     class Meta:
         model = Budget
         fields = [
-            'id', 'name', 'fiscal_year', 'start_date', 'end_date',
-            'description', 'is_active', 'created_at', 'lines'
+            'id', 'name', 'fiscal_year', 'campus', 'campus_name', 'start_date', 'end_date',
+            'description', 'status', 'is_active', 'created_at', 'lines'
         ]
 
     @transaction.atomic

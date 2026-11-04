@@ -578,8 +578,47 @@ class ConflictEngine:
         class_session,
         result: ConflictResult
     ):
-        """Check if room type matches subject requirements."""
-        # Check if subject requires specific room type (via WorkAllocation)
+        """Check if room type matches subject requirements and grade assignment rules."""
+        # 1. Check if room is active for scheduling
+        if not getattr(room, 'is_active_for_scheduling', True):
+            result.add_conflict(Conflict(
+                type=ConflictType.ROOM_TYPE_MISMATCH,
+                message=f"Room '{room.name}' is marked as inactive for scheduling.",
+                entity_type='room',
+                entity_id=room.id,
+                entity_name=room.name,
+            ))
+            return
+
+        # 2. Check room assignment rules (dedicated / preferred)
+        class_grade = getattr(class_session, 'grade', None)
+        grade_name = class_grade.name if class_grade else "this class"
+        assignment_mode = getattr(room, 'assignment_mode', 'shared')
+
+        if assignment_mode == 'dedicated':
+            if class_grade and not room.assigned_grades.filter(id=class_grade.id).exists():
+                assigned_names = ", ".join(g.name for g in room.assigned_grades.all()) or "other grades"
+                result.add_conflict(Conflict(
+                    type=ConflictType.ROOM_TYPE_MISMATCH,
+                    message=f"Room '{room.name}' is dedicated to {assigned_names} and cannot be used by {grade_name}.",
+                    entity_type='room',
+                    entity_id=room.id,
+                    entity_name=room.name,
+                    details={'assignment_mode': 'dedicated', 'assigned_grades': assigned_names}
+                ))
+        elif assignment_mode == 'preferred':
+            if class_grade and not room.assigned_grades.filter(id=class_grade.id).exists():
+                assigned_names = ", ".join(g.name for g in room.assigned_grades.all()) or "other grades"
+                result.add_warning(Warning(
+                    severity=WarningSeverity.LOW,
+                    message=f"Room '{room.name}' is preferred for {assigned_names}, but is being assigned to {grade_name}.",
+                    suggestion="Consider using an unassigned or shared room if possible.",
+                    entity_type='room',
+                    entity_id=room.id,
+                    details={'assignment_mode': 'preferred', 'assigned_grades': assigned_names}
+                ))
+
+        # 3. Check if subject requires specific room type (via WorkAllocation)
         try:
             allocation = self.WorkAllocation.objects.get(
                 subject=subject,

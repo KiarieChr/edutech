@@ -41,6 +41,7 @@ Progression Map Size: 6
 Start Year: 2023, Start Grade: Grade 1 (COMPETENCY BASED CURRICULUM), Curriculum: COMPETENCY BASED CURRICULUM
 Found 7 future/current years.
 Found 6 future/current grades.
+
 Progression Map Size: 6
   Year 2023 -> Grade Grade 1 (COMPETENCY BASED CURRICULUM): Found 0 terms.
   ERROR: No terms for year 2023!

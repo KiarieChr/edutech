@@ -33,20 +33,46 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        class_session_id = self.request.query_params.get('class_session')
+        class_id = (
+            self.request.query_params.get('class_id')
+            or self.request.query_params.get('class_session')
+            or self.request.query_params.get('class')
+        )
         
-        if class_session_id:
+        if class_id:
             try:
-                from apps.academics.models import ClassSession
-                session = ClassSession.objects.get(id=class_session_id)
-                if session.grade_id:
-                    # Filter subjects that are mapped to this class's grade
-                    mapped_subject_ids = GradeSubjectMapping.objects.filter(
-                        grade_id=session.grade_id
-                    ).values_list('subject_id', flat=True)
-                    queryset = queryset.filter(id__in=mapped_subject_ids)
-            except Exception:
-                pass
+                from django.apps import apps
+                ClassSession = apps.get_model('academics', 'ClassSession')
+                GradeStructure = apps.get_model('student_settings', 'GradeStructure')
+
+                curriculum_level = None
+
+                # 1. Look up ClassSession and extract curriculum_level
+                session = ClassSession.objects.filter(id=class_id).select_related(
+                    'curriculum_level', 'grade__curriculum_level'
+                ).first()
+
+                if session:
+                    curriculum_level = session.curriculum_level or (session.grade.curriculum_level if session.grade else None)
+                else:
+                    # 2. Check if class_id refers directly to a GradeStructure
+                    grade = GradeStructure.objects.filter(id=class_id).select_related('curriculum_level').first()
+                    if grade:
+                        curriculum_level = grade.curriculum_level
+
+                print(f"[SubjectViewSet] class_id={class_id}, resolved curriculum_level={curriculum_level}")
+
+                if curriculum_level:
+                    filtered_qs = queryset.filter(curriculum_level=curriculum_level)
+                    print(f"[SubjectViewSet] count={filtered_qs.count()}")
+                    return filtered_qs
+                
+                # Strict: If class is provided but has no curriculum_level, return empty list
+                print(f"[SubjectViewSet] No curriculum_level found for class {class_id}")
+                return queryset.none()
+            except Exception as e:
+                print(f"[SubjectViewSet] Error resolving subjects for class {class_id}: {e}")
+                return queryset.none()
                 
         return queryset
 
@@ -78,11 +104,11 @@ class GradeSubjectMappingViewSet(viewsets.ModelViewSet):
 
 
 class RoomViewSet(viewsets.ModelViewSet):
-    queryset = Room.objects.select_related('campus')
+    queryset = Room.objects.select_related('campus').prefetch_related('assigned_grades')
     serializer_class = RoomSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['room_type', 'campus', 'is_active']
+    filterset_fields = ['room_type', 'campus', 'is_active', 'assignment_mode', 'is_active_for_scheduling']
     search_fields = ['name']
 
 
@@ -179,6 +205,80 @@ class TimetableSlotViewSet(viewsets.ModelViewSet):
             grouped[slot_data['day_of_week']].append(slot_data)
 
         return Response(dict(grouped))
+
+    @action(detail=False, methods=['get'], url_path='generate_document')
+    def generate_document(self, request):
+        class_session_id = request.query_params.get('class_session')
+        if not class_session_id:
+            return Response({'error': 'class_session query param required'}, status=400)
+
+        from academics.models import ClassSession
+        try:
+            cs = ClassSession.objects.get(pk=class_session_id)
+        except ClassSession.DoesNotExist:
+            return Response({'error': 'ClassSession not found'}, status=404)
+
+        template_id = request.query_params.get('template_id')
+        if template_id:
+            try:
+                template_id = int(template_id)
+            except (ValueError, TypeError):
+                template_id = None
+
+        is_preview = request.query_params.get('preview', 'false').lower() in ('true', '1')
+
+        try:
+            from timetable.documents import TimetableDataProvider
+            from documents.services import DocumentGeneratorService, TemplateResolutionError
+            provider = TimetableDataProvider(cs)
+
+            if is_preview:
+                preview_data = DocumentGeneratorService.generate_preview_html(
+                    provider, template_id=template_id
+                )
+                return Response(preview_data, status=status.HTTP_200_OK)
+
+            pdf_bytes = DocumentGeneratorService.generate_pdf(provider, template_id=template_id)
+            clean_name = (getattr(cs, 'name', None) or f"session_{cs.id}").replace(' ', '_')
+            filename = f"timetable_{clean_name}.pdf"
+            from django.http import HttpResponse
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
+            return response
+
+        except TemplateResolutionError as exc:
+            return Response(
+                {
+                    'error': str(exc),
+                    'code': 'TEMPLATE_RESOLUTION_FAILED',
+                    'detail': 'No published document template is available for this category.'
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {'error': f'Failed to generate timetable: {str(exc)}', 'code': 'GENERATION_ERROR'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=False, methods=['get'], url_path='available_templates')
+    def available_templates(self, request):
+        from documents.models import DocumentTemplate
+        from documents.services import DocumentTemplateResolver
+        templates = DocumentTemplateResolver.get_available_templates(
+            category=DocumentTemplate.Category.TIMETABLE
+        )
+        return Response([
+            {
+                'id': t.id,
+                'name': t.name,
+                'category': t.category,
+                'is_default': t.is_default,
+                'status': t.status,
+                'updated_at': t.updated_at,
+            }
+            for t in templates
+        ])
 
 
 class TimetableExceptionViewSet(viewsets.ModelViewSet):
@@ -654,19 +754,30 @@ class ClassTimetableView(APIView):
             is_active=True,
         ).select_related('subject', 'teacher', 'room').order_by('day_of_week', 'start_time')
 
-        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-        days = {day: [] for day in day_names}
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        days = {day: [] for day in day_names[:6]}
 
         for slot in slots:
-            days[day_names[slot.day_of_week]].append({
+            if not (0 <= slot.day_of_week < len(day_names)):
+                continue
+            day_label = day_names[slot.day_of_week]
+            if day_label not in days:
+                days[day_label] = []
+
+            teacher_name = ''
+            if slot.teacher:
+                fn = getattr(slot.teacher, 'get_full_name', None)
+                teacher_name = fn() if callable(fn) else (str(fn) if fn else getattr(slot.teacher, 'username', ''))
+
+            days[day_label].append({
                 'id': slot.id,
-                'subject': slot.subject.name,
-                'subject_code': slot.subject.code,
-                'subject_color': slot.subject.color_hex,
-                'teacher': slot.teacher.get_full_name or slot.teacher.username,
+                'subject': slot.subject.name if slot.subject else 'Unassigned',
+                'subject_code': slot.subject.code if slot.subject else '',
+                'subject_color': getattr(slot.subject, 'color_hex', None) or '#6366f1',
+                'teacher': teacher_name,
                 'room': slot.room.name if slot.room else None,
-                'start_time': slot.start_time.strftime('%H:%M'),
-                'end_time': slot.end_time.strftime('%H:%M'),
+                'start_time': slot.start_time.strftime('%H:%M') if slot.start_time else '',
+                'end_time': slot.end_time.strftime('%H:%M') if slot.end_time else '',
             })
 
         # Get coverage info
@@ -888,11 +999,16 @@ class MonthlyTimetableView(APIView):
                     if slot.effective_until and slot.effective_until < current_date:
                         continue
                         
+                    t_name = getattr(slot.teacher, 'get_full_name', None)
+                    if callable(t_name):
+                        t_name = t_name()
+                    teacher_display = t_name or slot.teacher.username
+
                     day_slots.append({
                         'id': slot.id,
                         'subject_name': slot.subject.name,
                         'subject_color': slot.subject.color_hex,
-                        'teacher_name': slot.teacher.get_full_name() or slot.teacher.username,
+                        'teacher_name': teacher_display,
                         'class_session_name': slot.class_session.name,
                         'room_name': slot.room.name if slot.room else None,
                         'start_time': slot.start_time.strftime('%H:%M'),
@@ -923,7 +1039,10 @@ class MonthlyTimetableView(APIView):
             elif teacher_id:
                 try:
                     t = User.objects.get(pk=teacher_id)
-                    entity_name = f"Teacher {t.get_full_name() or t.username}"
+                    t_name = getattr(t, 'get_full_name', None)
+                    if callable(t_name):
+                        t_name = t_name()
+                    entity_name = f"Teacher {t_name or t.username}"
                 except:
                     pass
                     
@@ -939,3 +1058,65 @@ class MonthlyTimetableView(APIView):
             'month': month,
             'days': monthly_schedule
         })
+
+
+class TimetableExportPDFView(APIView):
+    """
+    Exports a branded, high-quality PDF for a class session, teacher, or room timetable.
+    GET /api/timetable/export-pdf/?class_session=37
+    GET /api/timetable/export-pdf/?teacher=5
+    GET /api/timetable/export-pdf/?room=2
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.http import HttpResponse
+        from .services.pdf_export import TimetablePDFGenerator
+
+        class_id = (
+            request.query_params.get('class_session')
+            or request.query_params.get('class_id')
+            or request.query_params.get('class')
+        )
+        teacher_id = (
+            request.query_params.get('teacher')
+            or request.query_params.get('teacher_id')
+        )
+        room_id = (
+            request.query_params.get('room')
+            or request.query_params.get('room_id')
+        )
+        inline = request.query_params.get('inline') in ['1', 'true', 'True', True]
+
+        if class_id:
+            try:
+                gen = TimetablePDFGenerator('class', int(class_id))
+            except (ValueError, TypeError) as e:
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        elif teacher_id:
+            try:
+                gen = TimetablePDFGenerator('teacher', int(teacher_id))
+            except (ValueError, TypeError) as e:
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        elif room_id:
+            try:
+                gen = TimetablePDFGenerator('room', int(room_id))
+            except (ValueError, TypeError) as e:
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response(
+                {'error': 'Missing query parameter. Please specify class_session, teacher, or room.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            pdf_bytes, filename = gen.generate()
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': f'Failed to generate PDF: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        disposition = 'inline' if inline else f'attachment; filename="{filename}"'
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = disposition
+        return response

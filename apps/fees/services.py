@@ -113,7 +113,46 @@ class BillingService:
         except:
              pass
 
-        # Find Active Fee Structure
+        # Find Active Fee Structure (Campus-Specific first, fallback to Institution-Wide Shared)
+        student_campus = getattr(enrollment, 'campus', None) or getattr(enrollment.student, 'campus', None)
+        campus_scopes = [student_campus, None] if student_campus else [None]
+        structure = None
+        for scope_campus in campus_scopes:
+            structure = FeeStructure.objects.filter(
+                academic_year=year,
+                term=term,
+                grade=grade,
+                campus=scope_campus,
+                status='ACTIVE'
+            ).first()
+            if not structure:
+                structure = FeeStructure.objects.filter(
+                    academic_year=year,
+                    term=term,
+                    grade__name__iexact=grade.name,
+                    campus=scope_campus,
+                    status='ACTIVE'
+                ).first()
+            if structure and structure.curriculum and structure.curriculum != curriculum:
+                structure = FeeStructure.objects.filter(
+                    academic_year=year,
+                    term=term,
+                    grade=grade,
+                    curriculum=curriculum,
+                    campus=scope_campus,
+                    status='ACTIVE'
+                ).first() or FeeStructure.objects.filter(
+                    academic_year=year,
+                    term=term,
+                    grade__name__iexact=grade.name,
+                    curriculum=curriculum,
+                    campus=scope_campus,
+                    status='ACTIVE'
+                ).first()
+            if structure:
+                break
+
+        resolved_structure = structure
         # Prioritize matching curriculum, fallback to null/default if structure design permits (but usually strict)
         structure = FeeStructure.objects.filter(
             academic_year=year,
@@ -152,6 +191,7 @@ class BillingService:
                     status='ACTIVE'
                 ).first()
 
+        structure = resolved_structure
         context = {
             'student_id': student_id,
             'student_name': str(enrollment.student),
@@ -219,6 +259,20 @@ class BillingService:
             raise ValidationError("Invalid Fee Structure.")
         
         if structure.status != 'ACTIVE':
+            raise ValidationError(
+                f"Fee Structure '{structure}' is not ACTIVE. Only ACTIVE structures can be invoiced."
+            )
+
+        # Verify campus isolation: a student cannot be billed with another campus's private FeeStructure
+        if structure.campus_id:
+            from student_management.models import Student
+            st_obj = Student.objects.filter(pk=student_id).first()
+            if st_obj and st_obj.campus_id and st_obj.campus_id != structure.campus_id:
+                raise ValidationError(
+                    f"Fee Structure '{structure}' belongs to {structure.campus.name} and cannot be applied to a student in another campus."
+                )
+
+        if False:
             raise ValidationError(
                 f"Fee Structure '{structure}' is not ACTIVE. Only ACTIVE structures can be invoiced."
             )

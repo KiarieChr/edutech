@@ -21,21 +21,29 @@ def sync_parent_to_crm(sender, instance, created, **kwargs):
     if not phone.startswith('+'):
         phone = '+' + phone
         
-    crm_parent, crm_created = ParentGuardian.objects.get_or_create(
-        phone=phone,
-        defaults={
-            'user': instance.user,
-            'first_name': instance.first_name,
-            'last_name': instance.last_name,
-            'email': instance.email,
-            'whatsapp_number': phone,
-        }
-    )
-    
+    crm_parent = None
+    crm_created = False
+    if instance.user:
+        crm_parent = ParentGuardian.objects.filter(user=instance.user).first()
+
+    if not crm_parent:
+        crm_parent, crm_created = ParentGuardian.objects.get_or_create(
+            phone=phone,
+            defaults={
+                'user': instance.user,
+                'first_name': instance.first_name,
+                'last_name': instance.last_name,
+                'email': instance.email,
+                'whatsapp_number': phone,
+            }
+        )
+
     if not crm_created:
         crm_parent.first_name = instance.first_name
         crm_parent.last_name = instance.last_name
         crm_parent.email = instance.email
+        crm_parent.phone = phone
+        crm_parent.whatsapp_number = phone
         if instance.user and not crm_parent.user:
             crm_parent.user = instance.user
         crm_parent.save()

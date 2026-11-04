@@ -8,7 +8,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .core_models import (
-    Employee, Country, County, SubCounty, Village,
+    Employee, EmployeeContract, Country, County, SubCounty, Village,
     EmployeeAddress, EmergencyContact
 )
 from .models import (
@@ -748,7 +748,8 @@ class PayrollPeriodAdmin(admin.ModelAdmin):
     
     def total_net_pay_display(self, obj):
         """Display formatted net pay"""
-        return f"${obj.total_net_pay:,.2f}"
+        from workforce.reports_pdf import get_tenant_currency
+        return f"{get_tenant_currency()} {obj.total_net_pay:,.2f}"
     total_net_pay_display.short_description = 'Total Net Pay'
     
     def lock_periods(self, request, queryset):
@@ -968,6 +969,23 @@ class PayrollAuditLogAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Audit logs cannot be deleted"""
         return False
+
+
+@admin.register(EmployeeContract)
+class EmployeeContractAdmin(admin.ModelAdmin):
+    """Employee Contract Admin"""
+    list_display = [
+        'employee', 'contract_type', 'start_date',
+        'end_date', 'gross_salary', 'status', 'created_at'
+    ]
+    list_filter = ['contract_type', 'status', 'start_date']
+    search_fields = [
+        'employee__employee_no', 'employee__first_name',
+        'employee__last_name'
+    ]
+    raw_id_fields = ['employee']
+    date_hierarchy = 'start_date'
+
 # ============================================================================
 # ADMIN SITE CUSTOMIZATION
 # ============================================================================

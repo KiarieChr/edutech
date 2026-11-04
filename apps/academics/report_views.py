@@ -892,7 +892,7 @@ def report_transfers(request):
 
     students = Student.objects.select_related('student').filter(
         status__in=['transferred', 'inactive', 'dropped'],
-    ).order_by('-updated_at')
+    ).order_by('-student__date_joined')
 
     # Also count transfer-ins (previous_school_name is set = came from another school)
     transfers_in = Student.objects.filter(
@@ -911,8 +911,8 @@ def report_transfers(request):
             'dropped': 'Dropout',
         }.get(s.status, s.status.title())
         date_val = (
-            s.leaving_date.isoformat() if hasattr(s, 'leaving_date') and s.leaving_date
-            else s.updated_at.date().isoformat() if s.updated_at else ''
+            s.previous_school_leaving_date.isoformat() if s.previous_school_leaving_date
+            else s.admission_date.isoformat() if s.admission_date else ''
         )
         table.append({
             'student': s.student.get_full_name,
@@ -969,9 +969,9 @@ def report_demographics(request):
         min_dob = today.replace(year=today.year - max_age - 1)
         max_dob = today.replace(year=today.year - min_age)
         qs = students.filter(
-            student__date_of_birth__isnull=False,
-            student__date_of_birth__gt=min_dob,
-            student__date_of_birth__lte=max_dob,
+            date_of_birth__isnull=False,
+            date_of_birth__gt=min_dob,
+            date_of_birth__lte=max_dob,
         )
         total = qs.count()
         male = qs.filter(student__gender='M').count()

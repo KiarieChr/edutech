@@ -28,6 +28,9 @@ def fee_insights(request):
         from student_settings.models import Term, AcademicYear
         from academics.models import StudentSessionEnrollment, ClassSession
         from student_management.models import Student
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        student_campus_q = Q(student__campus_id=effective_cid) if effective_cid else Q()
         
         # Get current term
         current_term = Term.objects.filter(is_current=True).select_related('academic_year').first()
@@ -49,7 +52,7 @@ def fee_insights(request):
         enrolled_students = StudentSessionEnrollment.objects.filter(
             session__in=current_sessions,
             status='active'
-        ).values_list('student_id', flat=True).distinct()
+        ).filter(student_campus_q).values_list('student_id', flat=True).distinct()
         
         total_enrolled = len(enrolled_students)
         
@@ -57,7 +60,7 @@ def fee_insights(request):
         invoiced_students = FeeInvoice.objects.filter(
             term=current_term,
             academic_year=current_year
-        ).exclude(status='VOID').values_list('student_id', flat=True).distinct() if current_term else []
+        ).filter(student_campus_q).exclude(status='VOID').values_list('student_id', flat=True).distinct() if current_term else []
         
         invoiced_count = len(set(invoiced_students))
         not_invoiced_count = total_enrolled - invoiced_count
@@ -94,7 +97,7 @@ def fee_insights(request):
             term=current_term,
             balance__gt=0,
             due_date__lt=today
-        ).exclude(status='VOID').select_related(
+        ).filter(student_campus_q).exclude(status='VOID').select_related(
             'student__student'
         ).values(
             'student_id',
@@ -115,7 +118,7 @@ def fee_insights(request):
         previous_term_defaulters = FeeInvoice.objects.filter(
             term=prev_term,
             balance__gt=0
-        ).exclude(status='VOID').select_related(
+        ).filter(student_campus_q).exclude(status='VOID').select_related(
             'student__student'
         ).values(
             'student_id',
@@ -131,7 +134,7 @@ def fee_insights(request):
             term=current_term,
             balance__gt=0,
             due_date__lt=today
-        ).exclude(status='VOID').aggregate(
+        ).filter(student_campus_q).exclude(status='VOID').aggregate(
             total=Sum('balance'),
             count=Count('id')
         ) if current_term else {'total': 0, 'count': 0}
@@ -139,7 +142,7 @@ def fee_insights(request):
         total_previous_arrears = FeeInvoice.objects.filter(
             term=prev_term,
             balance__gt=0
-        ).exclude(status='VOID').aggregate(
+        ).filter(student_campus_q).exclude(status='VOID').aggregate(
             total=Sum('balance'),
             count=Count('id')
         ) if prev_term else {'total': 0, 'count': 0}
@@ -162,7 +165,7 @@ def fee_insights(request):
         # 3. FEE COLLECTION SUMMARY
         current_term_collection = FeeInvoice.objects.filter(
             term=current_term
-        ).exclude(status='VOID').aggregate(
+        ).filter(student_campus_q).exclude(status='VOID').aggregate(
             total_billed=Sum('total_amount'),
             total_paid=Sum('paid_amount'),
             total_balance=Sum('balance')
@@ -305,6 +308,33 @@ def fee_insights(request):
             })
         
         insights["alerts"] = alerts
+        insights["campus_id"] = effective_cid
+        if effective_cid is None:
+            try:
+                from workforce.models import Campus
+                breakdown = []
+                for camp in Campus.objects.filter(is_active=True):
+                    c_agg = FeeInvoice.objects.filter(
+                        term=current_term, student__campus=camp
+                    ).exclude(status='VOID').aggregate(
+                        billed=Sum('total_amount'),
+                        paid=Sum('paid_amount'),
+                        balance=Sum('balance'),
+                    ) if current_term else {'billed': 0, 'paid': 0, 'balance': 0}
+                    billed_v = float(c_agg['billed'] or 0)
+                    paid_v = float(c_agg['paid'] or 0)
+                    breakdown.append({
+                        'campus_id': camp.id,
+                        'campus_name': camp.name,
+                        'campus_code': camp.code,
+                        'total_billed': billed_v,
+                        'total_collected': paid_v,
+                        'total_outstanding': float(c_agg['balance'] or 0),
+                        'collection_rate': round((paid_v / billed_v) * 100, 1) if billed_v > 0 else 0.0,
+                    })
+                insights["campus_breakdown"] = breakdown
+            except Exception:
+                insights["campus_breakdown"] = []
         
         return Response({
             "success": True,
@@ -322,12 +352,28 @@ def fee_insights(request):
 class FeeStructureViewSet(viewsets.ModelViewSet):
     queryset = FeeStructure.objects.all()
     serializer_class = FeeStructureSerializer
-    filterset_fields = ['academic_year', 'term', 'grade', 'curriculum', 'status']
+    filterset_fields = ['academic_year', 'term', 'grade', 'curriculum', 'status', 'campus']
     
     def get_queryset(self):
         qs = super().get_queryset()
         # Optional: Order by most recent
-        return qs.order_by('-academic_year__start_date', '-term__start_date')
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(self.request)
+        if effective_cid is not None:
+            include_shared = str(self.request.query_params.get('include_shared', 'true')).lower() not in ('false', '0', 'no')
+            if include_shared:
+                qs = qs.filter(Q(campus_id=effective_cid) | Q(campus__isnull=True))
+            else:
+                qs = qs.filter(campus_id=effective_cid)
+        return qs.select_related('academic_year', 'term', 'grade', 'campus', 'source_template').order_by('-academic_year__start_date', '-term__start_date')
+
+    def perform_create(self, serializer):
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(self.request)
+        if effective_cid is not None and not serializer.validated_data.get('campus'):
+            serializer.save(campus_id=effective_cid)
+            return
+        super().perform_create(serializer)
 
     def list(self, request, *args, **kwargs):
         try:
@@ -367,6 +413,8 @@ class FeeStructureViewSet(viewsets.ModelViewSet):
         year_id = request.data.get('target_academic_year')
         term_id = request.data.get('target_term')
         curr_id = request.data.get('target_curriculum') or source.curriculum_id
+        from core.campus_filter import get_effective_campus_id
+        target_campus_id = request.data.get('target_campus') or get_effective_campus_id(request) or source.campus_id
         
         if not target_grade_ids or not year_id or not term_id:
             return Response(
@@ -394,6 +442,7 @@ class FeeStructureViewSet(viewsets.ModelViewSet):
                     term_id=term_id,
                     grade_id=grade_id,
                     curriculum_id=curr_id,
+                    campus_id=target_campus_id,
                     currency=source.currency,
                     status='DRAFT'
                 )
@@ -440,7 +489,16 @@ class FeeInvoiceViewSet(viewsets.ModelViewSet):
             'academic_year',
             'term',
             'class_session',
-            'class_session__grade'
+            'class_session',
+            'class_session__grade',
+            'student__campus',
+        )
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(self.request)
+        if effective_cid is not None:
+            queryset = queryset.filter(student__campus_id=effective_cid)
+        if False:
+            queryset = queryset.select_related(
         )
         return queryset.order_by('-date_issued', '-created_at')
 
@@ -506,10 +564,16 @@ class BillingViewSet(viewsets.ViewSet):
             return Response([])
 
         from student_management.models import Student
-        from student_settings.models import Enrollment
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        student_campus_q = Q(student__campus_id=effective_cid) if effective_cid else Q()
+        from student_management.models import Student
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        student_qs = Student.objects.filter(campus_id=effective_cid) if effective_cid else Student.objects.all()
         from django.db.models import Q
 
-        students = Student.objects.filter(
+        students = student_qs.filter(
             Q(student__first_name__icontains=query) |
             Q(student__last_name__icontains=query) |
             Q(admission_number__icontains=query)
@@ -549,7 +613,11 @@ class BillingViewSet(viewsets.ViewSet):
     def invoices(self, request):
         if request.method == 'GET':
             # List Invoices
-            queryset = FeeInvoice.objects.all().select_related('student__student', 'class_session', 'term', 'academic_year')
+            queryset = FeeInvoice.objects.all().select_related('student__student', 'student__campus', 'class_session', 'term', 'academic_year')
+            from core.campus_filter import get_effective_campus_id
+            effective_cid = get_effective_campus_id(request)
+            if effective_cid is not None:
+                queryset = queryset.filter(student__campus_id=effective_cid)
             
             # Filtering
             student_id = request.query_params.get('student_id')

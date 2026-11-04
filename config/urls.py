@@ -12,10 +12,16 @@ from rest_framework.routers import DefaultRouter
 from core.api_views import (
     list_commands, run_command,
     institution_profile_detail, institution_profile_update,
-    AuditLogViewSet, SystemConfigurationViewSet, bulk_update_config,
+    AuditLogViewSet, SystemConfigurationViewSet, bulk_update_config, restore_default_config,
     system_subscription_detail, system_subscription_update,
     SMSPricingBandViewSet,
     api_landing,
+)
+from core.branding_api import (
+    institution_branding_detail,
+    institution_branding_update,
+    institution_branding_logo_dispatch,
+    institution_branding_logo_remove,
 )
 # pyrefly: ignore [missing-import]
 from tenants.views import TenantInfoView, DashboardStatsView
@@ -27,6 +33,8 @@ core_router = DefaultRouter()
 core_router.register(r'audit-logs', AuditLogViewSet, basename='audit-log')
 core_router.register(r'system-config', SystemConfigurationViewSet, basename='system-config')
 core_router.register(r'sms-pricing-bands', SMSPricingBandViewSet, basename='sms-pricing-band')
+from workforce.viewsets import CampusViewSet
+core_router.register(r'campuses', CampusViewSet, basename='campus')
 
 urlpatterns = [
     path("", api_landing, name="api-landing"),
@@ -37,10 +45,15 @@ urlpatterns = [
     path('api/system/run-command/', run_command, name='run-command'),
     path('api/institution/', institution_profile_detail, name='institution-profile'),
     path('api/institution/update/', institution_profile_update, name='institution-profile-update'),
+    path('api/institution/branding/', institution_branding_detail, name='institution-branding-detail'),
+    path('api/institution/branding/update/', institution_branding_update, name='institution-branding-update'),
+    path('api/institution/branding/logo/', institution_branding_logo_dispatch, name='institution-branding-logo-dispatch'),
+    path('api/institution/branding/logo/remove/', institution_branding_logo_remove, name='institution-branding-logo-remove'),
     path('api/system-subscription/', system_subscription_detail, name='system-subscription'),
     path('api/system-subscription/update/', system_subscription_update, name='system-subscription-update'),
     path('api/', include(core_router.urls)),
     path('api/system-config/bulk-update/', bulk_update_config, name='system-config-bulk-update'),
+    path('api/system-config/restore-default/', restore_default_config, name='system-config-restore-default'),
     path('api/settings/', include('student_settings.urls')),
     path('api/recruitment/', include('recruitment.urls')),
     path('api/student-management/', include('student_management.urls')),
@@ -65,6 +78,9 @@ urlpatterns = [
     path('api/transport/', include('transport.urls')),
     path('api/assignments/', include('assignments.urls')),
     path('api/programmes/', include('programmes.urls')),
+    path('api/documents/', include('documents.urls')),
+    path('api/workforce/', include('workforce.api_urls')),
+    path('api/v1/workforce/', include('workforce.api_urls')),
     path('workforce/', include('workforce.api_urls')),
     path('api/public/tenants/', include('tenants.urls')),
     path('api/tenant/info/', TenantInfoView.as_view(), name='tenant-info'),
@@ -72,6 +88,7 @@ urlpatterns = [
     path('api/intelligence/', include('intelligence.urls')),
     path('api/crm/', include('crm.urls')),
     path('api/sync/v1/push/', __import__('core.sync_api').sync_api.SyncPushAPIView.as_view(), name='sync-push'),
+    path('api/sync/v1/pull/', __import__('core.sync_api').sync_api.SyncPullAPIView.as_view(), name='sync-pull'),
     #path('api/auth/', rest_framework.urls)
 ]
 

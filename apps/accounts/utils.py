@@ -13,7 +13,7 @@ def generate_password(length=12):
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def generate_student_id():
+def generate_student_id(campus=None):
     # Lazy imports to avoid circular dependencies
     from student_settings.models import AdmissionConfig
     from student_management.models import Student
@@ -77,6 +77,8 @@ def generate_student_id():
         # However, to be safer, we filter by the static parts of the current configuration (Prefix + Year if applicable)
         
         query = Student.objects.all()
+        if campus:
+            query = query.filter(campus=campus)
         
         # Refine query based on sequence to find relevant last entry
         # P-Y-S -> Starts with Prefix + Sep + Year

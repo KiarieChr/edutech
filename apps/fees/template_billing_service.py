@@ -57,7 +57,70 @@ class TemplateBillingService:
 
         grade = enrollment.grade
 
-        # Priority 1: Cohort-locked template (if student has intake cohort)
+        grade = enrollment.grade
+        student_campus = getattr(enrollment, 'campus', None) or getattr(student, 'campus', None)
+        campus_scopes = [student_campus, None] if student_campus else [None]
+
+        template = None
+        for scope_campus in campus_scopes:
+            if enrollment.intake:
+                template = FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    cohort=enrollment.intake,
+                    campus=scope_campus,
+                    grades=grade,
+                ).first() or FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    cohort=enrollment.intake,
+                    campus=scope_campus,
+                    grade_band__grades=grade,
+                ).first()
+            if not template:
+                template = FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    cohort__isnull=True,
+                    campus=scope_campus,
+                    grades=grade,
+                ).first()
+            if not template:
+                template = FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    cohort__isnull=True,
+                    campus=scope_campus,
+                    grade_band__grades=grade,
+                ).first()
+            if not template:
+                template = FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    campus=scope_campus,
+                    grades=grade,
+                ).first() or FeeTemplate.objects.filter(
+                    status='ACTIVE',
+                    term=term,
+                    academic_year=academic_year,
+                    campus=scope_campus,
+                    grade_band__grades=grade,
+                ).first()
+            if template:
+                break
+
+        resolved_template = template
+        if resolved_template is not None:
+            return resolved_template, enrollment
+        raise BillingError(
+            f"No active fee template covers {grade.name} for "
+            f"{term.name} {academic_year.name}."
+        )
         template = None
         if enrollment.intake:
             template = FeeTemplate.objects.filter(
@@ -120,6 +183,7 @@ class TemplateBillingService:
                 f"{term.name} {academic_year.name}."
             )
 
+        template = resolved_template or template
         return template, enrollment
 
     @staticmethod

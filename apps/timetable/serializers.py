@@ -42,13 +42,21 @@ class GradeSubjectMappingSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     room_type_display = serializers.CharField(source='get_room_type_display', read_only=True)
     campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
+    assignment_mode_display = serializers.CharField(source='get_assignment_mode_display', read_only=True)
+    assigned_grade_names = serializers.SerializerMethodField()
 
     class Meta:
         model = Room
         fields = [
             'id', 'name', 'room_type', 'room_type_display',
             'campus', 'campus_name', 'capacity', 'is_active', 'notes',
+            'assigned_grades', 'assigned_grade_names',
+            'assignment_mode', 'assignment_mode_display',
+            'is_active_for_scheduling',
         ]
+
+    def get_assigned_grade_names(self, obj):
+        return [g.name for g in obj.assigned_grades.all()]
 
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
@@ -139,6 +147,8 @@ class TimePeriodSerializer(serializers.ModelSerializer):
 class WorkAllocationSerializer(serializers.ModelSerializer):
     """Serializer for teacher-subject-class work allocations."""
     teacher_name = serializers.SerializerMethodField()
+    teacher_employee_id = serializers.SerializerMethodField()
+    teacher_employee_no = serializers.SerializerMethodField()
     subject_name = serializers.CharField(source='subject.name', read_only=True)
     subject_code = serializers.CharField(source='subject.code', read_only=True)
     class_session_name = serializers.CharField(source='class_session.name', read_only=True)
@@ -151,7 +161,7 @@ class WorkAllocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = WorkAllocation
         fields = [
-            'id', 'teacher', 'teacher_name',
+            'id', 'teacher', 'teacher_name', 'teacher_employee_id', 'teacher_employee_no',
             'subject', 'subject_name', 'subject_code',
             'class_session', 'class_session_name',
             'lessons_per_week', 'scheduled_lessons', 'remaining_lessons',
@@ -165,7 +175,34 @@ class WorkAllocationSerializer(serializers.ModelSerializer):
         ]
 
     def get_teacher_name(self, obj):
-        return obj.teacher.get_full_name or obj.teacher.username
+        try:
+            if hasattr(obj.teacher, 'employee_profile') and obj.teacher.employee_profile:
+                emp = obj.teacher.employee_profile
+                emp_name = emp.get_full_name() if callable(getattr(emp, 'get_full_name', None)) else getattr(emp, 'get_full_name', None)
+                if emp_name:
+                    return emp_name
+        except Exception:
+            pass
+        name = getattr(obj.teacher, 'get_full_name', None)
+        if callable(name):
+            name = name()
+        return name or getattr(obj.teacher, 'username', '')
+
+    def get_teacher_employee_id(self, obj):
+        try:
+            if hasattr(obj.teacher, 'employee_profile') and obj.teacher.employee_profile:
+                return obj.teacher.employee_profile.id
+        except Exception:
+            pass
+        return None
+
+    def get_teacher_employee_no(self, obj):
+        try:
+            if hasattr(obj.teacher, 'employee_profile') and obj.teacher.employee_profile:
+                return obj.teacher.employee_profile.employee_no
+        except Exception:
+            pass
+        return None
 
     def get_room_type_display(self, obj):
         if obj.required_room_type:
@@ -175,12 +212,53 @@ class WorkAllocationSerializer(serializers.ModelSerializer):
 
 class WorkAllocationCreateSerializer(serializers.ModelSerializer):
     """Simplified serializer for creating work allocations."""
+    teacher = serializers.CharField(required=True)
+
     class Meta:
         model = WorkAllocation
         fields = [
             'teacher', 'subject', 'class_session',
             'lessons_per_week', 'required_room_type', 'notes',
         ]
+
+    def validate_teacher(self, value):
+        from django.apps import apps
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        Employee = apps.get_model('workforce', 'Employee')
+        
+        # 1. Check if value is an Employee profile ID
+        try:
+            emp = Employee.objects.filter(id=value).select_related('user').first()
+            if emp:
+                if emp.user:
+                    return emp.user
+                else:
+                    # Link or create user for this employee
+                    username = f"emp_{emp.employee_no.lower()}"
+                    user, _ = User.objects.get_or_create(
+                        username=username,
+                        defaults={
+                            'first_name': emp.first_name,
+                            'last_name': emp.last_name,
+                            'email': emp.official_email or emp.personal_email or f"{username}@school.internal"
+                        }
+                    )
+                    emp.user = user
+                    emp.save(update_fields=['user'])
+                    return user
+        except Exception:
+            pass
+
+        # 2. Check if value is a direct User ID
+        try:
+            user = User.objects.filter(id=value).first()
+            if user:
+                return user
+        except Exception:
+            pass
+
+        raise serializers.ValidationError(f"Invalid teacher / staff profile ID: {value}")
 
     def validate(self, data):
         # Check for duplicate allocation

@@ -45,3 +45,25 @@ class TenantAccessPermission(BasePermission):
                 return False
                 
         return True
+
+
+class CanManageBrandingPermission(BasePermission):
+    """
+    Enforces that only authorized institution administrators (staff or superusers)
+    who belong to the current tenant can modify branding settings, templates, or assets.
+    """
+    message = "You do not have administrative permissions to modify institutional branding or document templates."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        # Must be staff member of this tenant
+        if not request.user.is_staff:
+            return False
+        # Verify tenant membership if inside a tenant schema
+        if hasattr(request, 'tenant') and request.tenant.schema_name != 'public':
+            return request.user.tenants.filter(id=request.tenant.id).exists()
+        return True
+

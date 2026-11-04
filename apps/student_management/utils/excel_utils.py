@@ -18,6 +18,8 @@ from student_settings.models import (
 from student_management.models.admission import Admission
 from student_settings.models import Enrollment
 from student_management.models.application import Application
+from workforce.models import Campus
+from collections import defaultdict
 
 class ExcelImportUtils:
     
@@ -39,6 +41,7 @@ class ExcelImportUtils:
         ('guardian_name', False, 'Guardian Name'),
         ('guardian_phone', False, 'Guardian Phone'),
         ('guardian_email', False, 'Guardian Email'),
+        ('campus_code', False, 'Campus Code'),
     ]
 
     @classmethod
@@ -86,6 +89,7 @@ class ExcelImportUtils:
         intakes = list(Intake.objects.values_list('name', flat=True))
         years = list(AcademicYear.objects.values_list('name', flat=True))
         terms = list(Term.objects.values_list('name', flat=True))
+        campuses = list(Campus.objects.filter(is_active=True).values_list('code', flat=True))
 
         validations = {
             'C': create_dropdown(genders, 'A', 'GenderRange'),
@@ -96,6 +100,7 @@ class ExcelImportUtils:
             'K': create_dropdown(intakes, 'F', 'IntakeRange'),
             'L': create_dropdown(years, 'G', 'YearRange'),
             'M': create_dropdown(terms, 'H', 'TermRange'),
+            'Q': create_dropdown(campuses, 'I', 'CampusRange'),
         }
 
         # Apply Validations to rows 2-1000
@@ -115,7 +120,7 @@ class ExcelImportUtils:
         return response
 
     @classmethod
-    def parse_and_validate(cls, file):
+    def parse_and_validate(cls, file, target_campus=None):
         wb = openpyxl.load_workbook(file, data_only=True)
         ws = wb.active # Assume first sheet
         
@@ -149,8 +154,16 @@ class ExcelImportUtils:
             cache['terms'][(t.name, str(t.academic_year.name))] = t
         # Also keep a flat name→term map as fallback for rows missing year
         cache['terms_by_name'] = {t.name: t for t in Term.objects.all()}
+        cache['campuses_by_code'] = {c.code.strip().upper(): c for c in Campus.objects.all() if c.code}
+        cache['campuses_by_name'] = {c.name.strip().lower(): c for c in Campus.objects.all()}
+        cache['campuses_by_id'] = {c.id: c for c in Campus.objects.all()}
         
-        existing_adm_nos = set(Student.objects.values_list('admission_number', flat=True))
+        # Group existing admission numbers by campus_id to allow per-campus uniqueness
+        existing_adm_by_campus = defaultdict(set)
+        for cid, adm in Student.objects.filter(admission_number__isnull=False).values_list('campus_id', 'admission_number'):
+            if adm:
+                existing_adm_by_campus[cid].add(adm.strip())
+        seen_in_file = set()
 
         for idx, row in enumerate(rows, 2): # Start from row 2 (1-based index)
             if not any(row): continue # Skip empty rows
@@ -189,6 +202,17 @@ class ExcelImportUtils:
             row_data['guardian_name'] = get_val(13)
             row_data['guardian_phone'] = get_val(14)
             row_data['guardian_email'] = get_val(15)
+            
+            # --- 4. Campus Assignment ---
+            campus_val = get_val(16)
+            row_campus = None
+            if campus_val:
+                row_campus = cache['campuses_by_code'].get(campus_val.upper()) or cache['campuses_by_name'].get(campus_val.lower())
+                if not row_campus:
+                    row_errors.append(f"Campus '{campus_val}' not found")
+            resolved_campus = row_campus or target_campus
+            row_data['campus'] = resolved_campus
+            resolved_cid = resolved_campus.id if resolved_campus else None
 
             # --- VALIDATION ---
             
@@ -200,8 +224,16 @@ class ExcelImportUtils:
             if not row_data['last_name']: row_errors.append("Last Name is required")
             if not row_data['adm_no']: 
                 row_errors.append("Admission Number is required")
-            elif row_data['adm_no'] in existing_adm_nos:
-                row_errors.append(f"Admission Number {row_data['adm_no']} already exists")
+            else:
+                adm_val = row_data['adm_no']
+                if adm_val in existing_adm_by_campus[resolved_cid]:
+                    campus_label = f" in campus '{resolved_campus.name}'" if resolved_campus else ""
+                    row_errors.append(f"Admission Number {adm_val} already exists{campus_label}")
+                elif (resolved_cid, adm_val) in seen_in_file:
+                    campus_label = f" in campus '{resolved_campus.name}'" if resolved_campus else ""
+                    row_errors.append(f"Duplicate Admission Number {adm_val} within upload file{campus_label}")
+                else:
+                    seen_in_file.add((resolved_cid, adm_val))
             
             # Relations
             if curr_code in cache['curriculums']:
@@ -289,7 +321,9 @@ class ExcelImportUtils:
 
             # Add to preview (first 10)
             if idx < 12:
-                preview_item = {k: str(v) for k,v in row_data.items() if not k.endswith('_obj') and not k in ['curriculum', 'level', 'grade', 'stream', 'intake', 'year', 'term']}
+                preview_item = {k: str(v) for k,v in row_data.items() if not k.endswith('_obj') and not k in ['curriculum', 'level', 'grade', 'stream', 'intake', 'year', 'term', 'campus']}
+                if row_data.get('campus'):
+                    preview_item['campus'] = row_data['campus'].name
                 preview_item['status'] = 'Error' if row_errors else 'Valid'
                 results['preview'].append(preview_item)
 
@@ -298,7 +332,7 @@ class ExcelImportUtils:
 
     @classmethod
     @transaction.atomic
-    def process_import(cls, valid_data_list, user=None):
+    def process_import(cls, valid_data_list, user=None, target_campus=None):
         """
         Bulk-import students using bulk_create for performance.
         With 900 rows this reduces ~5400 DB queries to ~7 batch inserts.
@@ -357,6 +391,7 @@ class ExcelImportUtils:
                 date_of_birth=data.get('dob_obj'),
                 intake=data['intake'],
                 admission_date=data.get('adm_date_obj'),
+                campus=data.get('campus') or target_campus,
             )
             for i, data in enumerate(valid_data_list)
         ]
@@ -377,6 +412,7 @@ class ExcelImportUtils:
                 email=data.get('guardian_email'),
                 phone_number=data.get('guardian_phone'),
                 application_status='accepted',
+                campus=data.get('campus') or target_campus,
             )
             for data in valid_data_list
         ]
@@ -389,6 +425,8 @@ class ExcelImportUtils:
                 student=created_students[i],
                 admission_number=data['adm_no'],
                 admission_date=data.get('adm_date_obj') or now_date,
+                campus=data.get('campus') or target_campus,
+                admitted_by=importing_user,
             )
             for i, data in enumerate(valid_data_list)
         ])
@@ -404,6 +442,7 @@ class ExcelImportUtils:
                 curriculum_level=data.get('level'),
                 grade=data['grade'],
                 stream=data.get('stream'),
+                campus=data.get('campus') or target_campus,
                 enrollment_type='new_admission',
                 status='active',
                 is_active=True,
@@ -461,7 +500,7 @@ class ExcelImportUtils:
     # ── Chunked import helpers ───────────────────────────────────
 
     @staticmethod
-    def _serialize_valid_rows(valid_rows):
+    def _serialize_valid_rows(valid_rows, target_campus_id=None):
         """Convert validated rows (with ORM objects) to JSON-safe dicts for caching."""
         serialized = []
         for data in valid_rows:
@@ -482,13 +521,14 @@ class ExcelImportUtils:
                 'intake_id': data['intake'].pk,
                 'year_id': data['year'].pk,
                 'term_id': data['term'].pk,
+                'campus_id': data['campus'].pk if data.get('campus') else target_campus_id,
             }
             serialized.append(row)
         return serialized
 
     @classmethod
     @transaction.atomic
-    def process_chunk(cls, chunk_data, importing_user=None):
+    def process_chunk(cls, chunk_data, importing_user=None, target_campus_id=None):
         """
         Process a single chunk of serialized (ID-based) rows.
         Each chunk is its own atomic transaction — previous chunks survive if this fails.
@@ -546,6 +586,7 @@ class ExcelImportUtils:
                 date_of_birth=_to_date(data.get('dob_obj')),
                 intake_id=data['intake_id'],
                 admission_date=_to_date(data.get('adm_date_obj')),
+                campus_id=data.get('campus_id') or target_campus_id,
             )
             for i, data in enumerate(chunk_data)
         ]
@@ -566,6 +607,7 @@ class ExcelImportUtils:
                 email=data.get('guardian_email'),
                 phone_number=data.get('guardian_phone'),
                 application_status='accepted',
+                campus_id=data.get('campus_id') or target_campus_id,
             )
             for data in chunk_data
         ]
@@ -578,6 +620,8 @@ class ExcelImportUtils:
                 student=created_students[i],
                 admission_number=data['adm_no'],
                 admission_date=_to_date(data.get('adm_date_obj')) or now_date,
+                campus_id=data.get('campus_id') or target_campus_id,
+                admitted_by=importing_user,
             )
             for i, data in enumerate(chunk_data)
         ])
@@ -593,6 +637,7 @@ class ExcelImportUtils:
                 curriculum_level_id=data.get('level_id'),
                 grade_id=data['grade_id'],
                 stream_id=data.get('stream_id'),
+                campus_id=data.get('campus_id') or target_campus_id,
                 enrollment_type='new_admission',
                 status='active',
                 is_active=True,

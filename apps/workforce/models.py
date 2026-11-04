@@ -8,7 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
-from .core_models import TimestampedModel, AuditedModel, Employee
+from .core_models import TimestampedModel, AuditedModel, Employee, EmployeeContract
 
 
 from django.contrib.auth import get_user_model
@@ -188,6 +188,12 @@ class ContinuousProfessionalDevelopment(models.Model):
 
 class Campus(AuditedModel):
     """Institution campuses"""
+    class OperationalStatus(models.TextChoices):
+        ACTIVE = 'active', _('Active')
+        INACTIVE = 'inactive', _('Inactive')
+        MAINTENANCE = 'maintenance', _('Under Maintenance')
+        PLANNED = 'planned', _('Planned')
+
     institution = models.ForeignKey(
         'core.InstitutionProfile',
         on_delete=models.CASCADE,
@@ -198,9 +204,34 @@ class Campus(AuditedModel):
     )
     code = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=200)
-    location = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default='', help_text='Campus description and overview')
+    location = models.CharField(max_length=255, blank=True, default='')
     cost_center_code = models.CharField(max_length=50, blank=True)
+    operational_status = models.CharField(
+        max_length=20,
+        choices=OperationalStatus.choices,
+        default=OperationalStatus.ACTIVE,
+        help_text='Operational status of the campus'
+    )
+    established_date = models.DateField(null=True, blank=True, help_text='Date campus was established')
     is_active = models.BooleanField(default=True)
+
+    # Campus Administrator (explicit User link in addition to principal_name text)
+    campus_admin = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='administered_campuses',
+        help_text='User assigned as the Campus Administrator'
+    )
+
+    authorized_users = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name='assigned_campuses',
+        help_text='Users explicitly assigned access to this campus within the institution.'
+    )
 
     # Address
     address_line_1 = models.CharField(max_length=255, blank=True)
@@ -223,9 +254,36 @@ class Campus(AuditedModel):
         db_table = 'hr_campus'
         verbose_name_plural = 'Campuses'
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['institution', 'code'],
+                name='unique_campus_code_per_institution'
+            )
+        ]
     
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        # Ensure owning institution is always associated
+        if not self.institution_id:
+            try:
+                from core.models import InstitutionProfile
+                self.institution = InstitutionProfile.get_instance()
+            except Exception:
+                pass
+        # Sync operational_status and is_active cleanly
+        if self.operational_status == self.OperationalStatus.INACTIVE and self.is_active:
+            # If operational_status was explicitly set to inactive, mark is_active False
+            pass
+        if not self.is_active and self.operational_status == self.OperationalStatus.ACTIVE:
+            self.operational_status = self.OperationalStatus.INACTIVE
+        elif self.is_active and self.operational_status == self.OperationalStatus.INACTIVE:
+            self.operational_status = self.OperationalStatus.ACTIVE
+        # Sync principal_name from campus_admin if empty
+        if self.campus_admin and not self.principal_name:
+            self.principal_name = self.campus_admin.get_full_name or self.campus_admin.username
+        super().save(*args, **kwargs)
 
 
 class Faculty(AuditedModel):

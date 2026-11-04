@@ -22,11 +22,13 @@ from student_management.serializers.workflow import (
 )
 
 
-class ApplicationViewSet(viewsets.ModelViewSet):
+from core.campus_filter import CampusPermissionMixin, CampusFilterBackend, get_effective_campus_id
+
+
+class ApplicationViewSet(CampusPermissionMixin, viewsets.ModelViewSet):
     queryset = Application.objects.all()
     serializer_class = ApplicationSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter, CampusFilterBackend]
     search_fields = ['first_name', 'last_name', 'email', 'guardian_name', 'phone_number']
     ordering_fields = ['created_at', 'last_name']
 
@@ -95,7 +97,12 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             
             adm_no = request.data.get('admission_number')
             if not adm_no:
-                adm_no = generate_student_id()
+                adm_no = generate_student_id(campus=application.campus)
+            
+            # Verify admission number uniqueness for target campus
+            if Student.objects.filter(campus=application.campus, admission_number=adm_no).exists():
+                campus_label = f" in {application.campus.name}" if application.campus else ""
+                raise serializers.ValidationError({'admission_number': f"Admission number '{adm_no}' already exists{campus_label}."})
             
             # 1. Create User
             username = f"{application.first_name.lower()}.{application.last_name.lower()}"
@@ -128,6 +135,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
             student = Student.objects.create(
                 student=user,
                 admission_number=adm_no,
+                campus=application.campus,
                 date_of_birth=application.date_of_birth,
                 # Copy other demographics
             )
@@ -307,7 +315,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         from rest_framework import serializers # Helper import just in case
         
         # Parse query params
-        campus_id = request.query_params.get('campus_id')
+        campus_id = get_effective_campus_id(request)
         intake_id = request.query_params.get('intake_id')
         date_start = request.query_params.get('date_start')
         date_end = request.query_params.get('date_end')
@@ -451,7 +459,7 @@ class ApplicationViewSet(viewsets.ModelViewSet):
         from django.utils import timezone as tz
 
         limit = int(request.query_params.get('limit', 15))
-        campus_id = request.query_params.get('campus_id')
+        campus_id = get_effective_campus_id(request)
         intake_id = request.query_params.get('intake_id')
 
         qs = self.get_queryset().select_related('campus', 'intake', 'applying_for_grade')

@@ -1,69 +1,79 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ==============================================================================
 # deploy.sh
-# Routine CI/CD deployment script for Academia.
+# Automated deployment script for Academia on Linux production.
+# ==============================================================================
 
-set -e
+set -euo pipefail
 
 ACADEMIA_DIR="/var/www/academia"
 BACKEND_DIR="${ACADEMIA_DIR}/edutech"
 FRONTEND_DIR="${ACADEMIA_DIR}/fahari-academia-front"
 
 echo "=============================================="
-echo " Starting Deployment..."
+echo " Starting Academia Deployment..."
 echo "=============================================="
 
-# 1. Pre-deployment backup
-echo ">>> Taking pre-deployment database backup..."
-cd ${BACKEND_DIR}
-source venv/bin/activate
-python scripts/db_backup.py || echo "Warning: Backup failed. Proceeding with caution..."
-
-# 2. Git pull latest changes
+# 1. Pull latest code
 echo ">>> Pulling latest code..."
-cd ${BACKEND_DIR}
-git pull origin main
-cd ${FRONTEND_DIR}
-git pull origin main
+cd "${BACKEND_DIR}"
+if [ -d ".git" ]; then
+    git pull origin "$(git rev-parse --abbrev-ref HEAD)" || true
+fi
 
-# 3. Dependency updates
+cd "${FRONTEND_DIR}"
+if [ -d ".git" ]; then
+    git pull origin "$(git rev-parse --abbrev-ref HEAD)" || true
+fi
+
+# 2. Dependency updates
 echo ">>> Updating backend dependencies..."
-cd ${BACKEND_DIR}
-pip install -r requirements.txt
+cd "${BACKEND_DIR}"
+if [ -d "venv" ]; then
+    venv/bin/pip install --no-input -r requirements.txt
+    venv/bin/pip install --no-input gunicorn
+fi
 
 echo ">>> Updating frontend dependencies..."
-cd ${FRONTEND_DIR}
-npm install
+cd "${FRONTEND_DIR}"
+npm install --no-audit --prefer-offline || npm install
 
-# 4. Database migrations
-echo ">>> Running Django migrations..."
-cd ${BACKEND_DIR}
+# 3. Database migrations
+echo ">>> Running Django tenant migrations..."
+cd "${BACKEND_DIR}"
 export DJANGO_SETTINGS_MODULE="config.settings.production"
-python manage.py migrate_schemas --shared
-python manage.py migrate_schemas --tenant
+venv/bin/python manage.py migrate_schemas --noinput
 
-# 5. Frontend build
+# 4. Frontend build
 echo ">>> Building frontend..."
-cd ${FRONTEND_DIR}
+cd "${FRONTEND_DIR}"
 npm run build
 
-# 6. Static files collection
+# 5. Static files collection
 echo ">>> Collecting backend static files..."
-cd ${BACKEND_DIR}
-python manage.py collectstatic --noinput
+cd "${BACKEND_DIR}"
+venv/bin/python manage.py collectstatic --noinput
+
+# 6. Normalize permissions
+echo ">>> Setting permissions for www-data..."
+chown -R www-data:www-data "${BACKEND_DIR}/media" "${BACKEND_DIR}/staticfiles" "${FRONTEND_DIR}/dist"
+chmod -R 775 "${BACKEND_DIR}/media" "${BACKEND_DIR}/staticfiles" "${FRONTEND_DIR}/dist"
 
 # 7. Service restart
 echo ">>> Restarting services..."
-sudo systemctl restart gunicorn_academia
-sudo systemctl restart celery_academia
+systemctl restart gunicorn_academia
+if systemctl list-unit-files | grep -q "celery_academia.service"; then
+    systemctl restart celery_academia || true
+fi
 
-# 8. Cache clearing
-echo ">>> Clearing Redis cache..."
-redis-cli flushall
+# 8. Reload Nginx
+nginx -t && systemctl reload nginx
 
-# 9. Health check
-echo ">>> Verifying deployment..."
-curl -I https://api.royalsoftwares.co.ke || echo "Backend check failed!"
-curl -I https://fahari.royalsoftwares.co.ke || echo "Frontend check failed!"
+# 9. Clear Redis cache
+if command -v redis-cli &> /dev/null; then
+    echo ">>> Clearing Redis cache..."
+    redis-cli flushall || true
+fi
 
 echo "=============================================="
 echo " Deployment Complete!"

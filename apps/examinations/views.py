@@ -13,6 +13,10 @@ from .models import (
     GradingScale, GradingLevel, AssessmentType, Examination,
     StudentMark, TermResult, TermSubjectResult, ReportCardTemplate
 )
+from django.http import HttpResponse
+from documents.models import DocumentTemplate
+from documents.services import DocumentGeneratorService, TemplateResolutionError, DocumentTemplateResolver
+from examinations.documents import TranscriptDataProvider
 from .serializers import (
     GradingScaleListSerializer, GradingScaleDetailSerializer,
     GradingLevelSerializer, AssessmentTypeSerializer,
@@ -675,6 +679,66 @@ class TermResultViewSet(viewsets.ReadOnlyModelViewSet):
         if published is not None:
             qs = qs.filter(is_published=published.lower() == 'true')
         return qs
+
+    @action(detail=True, methods=['get'], url_path='generate_document')
+    def generate_document(self, request, pk=None):
+        term_result = self.get_object()
+        template_id = request.query_params.get('template_id')
+        if template_id:
+            try:
+                template_id = int(template_id)
+            except (ValueError, TypeError):
+                template_id = None
+
+        is_preview = request.query_params.get('preview', 'false').lower() in ('true', '1')
+
+        try:
+            provider = TranscriptDataProvider(term_result)
+
+            if is_preview:
+                preview_data = DocumentGeneratorService.generate_preview_html(
+                    provider, template_id=template_id
+                )
+                return Response(preview_data, status=status.HTTP_200_OK)
+
+            pdf_bytes = DocumentGeneratorService.generate_pdf(provider, template_id=template_id)
+            clean_adm = (term_result.student.admission_number or f"id{term_result.id}").replace('/', '_')
+            filename = f"transcript_{clean_adm}.pdf"
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
+            return response
+
+        except TemplateResolutionError as exc:
+            return Response(
+                {
+                    'error': str(exc),
+                    'code': 'TEMPLATE_RESOLUTION_FAILED',
+                    'detail': 'No published document template is available for this category.'
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {'error': f'Failed to generate transcript: {str(exc)}', 'code': 'GENERATION_ERROR'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=['get'], url_path='available_templates')
+    def available_templates(self, request, pk=None):
+        templates = DocumentTemplateResolver.get_available_templates(
+            category=DocumentTemplate.Category.TRANSCRIPT
+        )
+        return Response([
+            {
+                'id': t.id,
+                'name': t.name,
+                'category': t.category,
+                'is_default': t.is_default,
+                'status': t.status,
+                'updated_at': t.updated_at,
+            }
+            for t in templates
+        ])
 
     @action(detail=False, methods=['post'])
     def publish(self, request):

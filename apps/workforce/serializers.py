@@ -34,7 +34,7 @@ from .models import (
 )
 from django.utils import timezone
 from .core_models import(
-    Employee, Country, County, SubCounty, Village,
+    Employee, EmployeeContract, Country, County, SubCounty, Village,
     EmployeeAddress, EmergencyContact,
 )
 
@@ -116,6 +116,60 @@ class EmployeeAddressSerializer(serializers.ModelSerializer):
 # ============================================================================
 
 class CampusSerializer(serializers.ModelSerializer):
+    """Campus serializer with operational counts and admin details"""
+    campus_admin_name = serializers.CharField(source='campus_admin.get_full_name', read_only=True)
+    institution_name = serializers.CharField(source='institution.name', read_only=True)
+    student_count = serializers.SerializerMethodField()
+    staff_count = serializers.SerializerMethodField()
+    department_count = serializers.SerializerMethodField()
+    active_fee_structures_count = serializers.SerializerMethodField()
+    overrides_count = serializers.SerializerMethodField()
+
+    def get_student_count(self, obj):
+        try:
+            from student_management.models import Student
+            return Student.objects.filter(campus=obj).count()
+        except Exception:
+            return 0
+
+    def get_staff_count(self, obj):
+        try:
+            return obj.employees.count()
+        except Exception:
+            return 0
+
+    def get_department_count(self, obj):
+        try:
+            return obj.departments.count()
+        except Exception:
+            return 0
+
+    def get_active_fee_structures_count(self, obj):
+        try:
+            from fees.models import FeeStructure, FeeTemplate
+            return (
+                FeeStructure.objects.filter(campus=obj, status='ACTIVE').count()
+                + FeeTemplate.objects.filter(campus=obj, status='ACTIVE').count()
+            )
+        except Exception:
+            return 0
+
+    def get_overrides_count(self, obj):
+        try:
+            return obj.config_overrides.filter(is_active=True).count()
+        except Exception:
+            return 0
+
+    def validate_code(self, value):
+        cleaned = (value or '').strip().upper()
+        if not cleaned:
+            raise serializers.ValidationError("Campus code is required.")
+        qs = Campus.objects.filter(code__iexact=cleaned)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(f"A campus with code '{cleaned}' already exists in this institution.")
+        return cleaned
     """Campus serializer"""
     class Meta:
         model = Campus
@@ -271,7 +325,9 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'id', 'employee_no', 'first_name', 'last_name', 'full_name',
             'email', 'phone', 'employee_category', 'employment_status',
             'employment_status_display', 'department', 'job_title',
-            'hire_date', 'employment_type', 'campus', 'campus_name'
+            'hire_date', 'employment_type', 'campus', 'campus_name',
+            'kra_pin', 'nssf_number', 'nhif_number',
+            'bank_name', 'bank_branch', 'bank_account_name', 'bank_account_number'
         ]
     
     def get_full_name(self, obj):
@@ -409,6 +465,25 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
                     pass
         
         return employee
+
+
+class EmployeeContractSerializer(serializers.ModelSerializer):
+    """Employee Contract Serializer"""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    employee_no = serializers.CharField(source='employee.employee_no', read_only=True)
+    contract_type_display = serializers.CharField(source='get_contract_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = EmployeeContract
+        fields = [
+            'id', 'employee', 'employee_name', 'employee_no',
+            'contract_type', 'contract_type_display',
+            'start_date', 'end_date', 'gross_salary',
+            'status', 'status_display', 'file_attachment',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
 
 
 # ============================================================================

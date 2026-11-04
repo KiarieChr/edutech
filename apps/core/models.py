@@ -2,6 +2,12 @@ from django.db import models
 from django.db.models import Q
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
+from django.core.validators import RegexValidator, MinValueValidator, MaxValueValidator
+
+hex_color_validator = RegexValidator(
+    regex=r'^#[0-9A-Fa-f]{6}$',
+    message=_('Must be a valid 6-character hexadecimal color code (e.g. #17365D).')
+)
 
 
 NEWS = _("News")
@@ -124,6 +130,16 @@ class InstitutionProfile(models.Model):
         UNIVERSITY = 'university', _('University')
         TVET = 'tvet', _('TVET Institution')
 
+    class FontFamily(models.TextChoices):
+        INTER = 'Inter', _('Inter (Modern Sans-serif)')
+        ROBOTO = 'Roboto', _('Roboto (Clean Sans-serif)')
+        OPEN_SANS = 'Open Sans', _('Open Sans (Neutral Sans-serif)')
+        LATO = 'Lato', _('Lato (Warm Sans-serif)')
+        MONTSERRAT = 'Montserrat', _('Montserrat (Geometric Sans-serif)')
+        MERRIWEATHER = 'Merriweather', _('Merriweather (Classic Serif)')
+        LORA = 'Lora', _('Lora (Contemporary Serif)')
+        PLAYFAIR = 'Playfair Display', _('Playfair Display (Editorial Serif)')
+
     # Identity
     business_sector = models.CharField(
         max_length=50, choices=BusinessSector.choices,
@@ -134,6 +150,14 @@ class InstitutionProfile(models.Model):
         help_text='List of enabled modules e.g., ["academics", "hr", "procurement"]'
     )
     name = models.CharField(_('Institution Name'), max_length=255)
+    display_name = models.CharField(
+        _('Display Name'), max_length=255, blank=True,
+        help_text=_('Alternative or short brand name displayed in headers and letterheads')
+    )
+    registered_name = models.CharField(
+        _('Registered / Legal Name'), max_length=255, blank=True,
+        help_text=_('Official registered legal entity name for statutory documents')
+    )
     short_name = models.CharField(_('Abbreviation'), max_length=50, blank=True)
     motto = models.CharField(max_length=255, blank=True)
     institution_type = models.CharField(
@@ -145,24 +169,78 @@ class InstitutionProfile(models.Model):
         _('Registration / License No.'), max_length=100, blank=True
     )
     established_date = models.DateField(null=True, blank=True)
-    logo = models.ImageField(upload_to='institution/', blank=True, null=True)
+    logo = models.ImageField(upload_to='institution/logos/', blank=True, null=True)
+    logo_dark = models.ImageField(
+        upload_to='institution/logos/', blank=True, null=True,
+        help_text=_('Alternative logo for dark backgrounds')
+    )
+    secondary_logo = models.ImageField(
+        upload_to='institution/logos/', blank=True, null=True,
+        help_text=_('Secondary emblem, sponsor logo, or coat of arms')
+    )
 
     # Contact
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=30, blank=True)
+    phone_alt = models.CharField(_('Alternative Telephone'), max_length=30, blank=True)
     website = models.URLField(blank=True)
 
     # Address
     address_line_1 = models.CharField(max_length=255, blank=True)
     address_line_2 = models.CharField(max_length=255, blank=True)
+    postal_address = models.CharField(
+        _('Postal Address'), max_length=255, blank=True,
+        help_text=_('e.g. P.O. Box 12345 - 00100, Nairobi')
+    )
     city = models.CharField(max_length=100, blank=True)
     county = models.CharField(_('County / State'), max_length=100, blank=True)
     postal_code = models.CharField(max_length=20, blank=True)
     country = models.CharField(max_length=100, default='Kenya')
+    additional_contact_info = models.TextField(
+        _('Additional Contact Info'), blank=True,
+        help_text=_('Office hours, visitor directions, emergency contact lines')
+    )
 
-    # Branding
-    primary_color = models.CharField(max_length=7, default='#4f46e5', blank=True)
-    secondary_color = models.CharField(max_length=7, default='#f59e0b', blank=True)
+    # Branding Colours
+    primary_color = models.CharField(
+        max_length=7, default='#17365D', blank=True,
+        validators=[hex_color_validator],
+        help_text=_('Primary brand colour (6-digit hex e.g. #17365D)')
+    )
+    secondary_color = models.CharField(
+        max_length=7, default='#1F6B4F', blank=True,
+        validators=[hex_color_validator],
+        help_text=_('Secondary brand colour (6-digit hex e.g. #1F6B4F)')
+    )
+    accent_color = models.CharField(
+        max_length=7, default='#D4A72C', blank=True,
+        validators=[hex_color_validator],
+        help_text=_('Accent colour for dividers, highlights, badges')
+    )
+    text_color = models.CharField(
+        max_length=7, default='#243042', blank=True,
+        validators=[hex_color_validator],
+        help_text=_('Default body text colour')
+    )
+    background_color = models.CharField(
+        max_length=7, default='#FFFFFF', blank=True,
+        validators=[hex_color_validator],
+        help_text=_('Document canvas / background colour')
+    )
+
+    # Typography Preferences
+    font_family = models.CharField(
+        max_length=50, choices=FontFamily.choices, default=FontFamily.INTER, blank=True,
+        help_text=_('Preferred typography family for document rendering')
+    )
+    font_size_body = models.PositiveIntegerField(
+        default=14, validators=[MinValueValidator(9), MaxValueValidator(20)],
+        help_text=_('Default body text size in pt/px (9 to 20)')
+    )
+    font_size_heading = models.PositiveIntegerField(
+        default=24, validators=[MinValueValidator(16), MaxValueValidator(48)],
+        help_text=_('Default heading text size in pt/px (16 to 48)')
+    )
 
     # Portal
     portal_url = models.URLField(
@@ -196,6 +274,16 @@ class InstitutionProfile(models.Model):
     admission_letter_template = models.TextField(
         blank=True, null=True,
         help_text='HTML template for the official admission letter body'
+    )
+
+    # Metadata & Auditing
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='updated_institution_profiles'
     )
 
     class Meta:
@@ -359,28 +447,97 @@ class SystemConfiguration(models.Model):
         return f"{self.group}/{self.key}"
 
     @classmethod
-    def get(cls, key, default=None):
-        """Retrieve a config value, cast to its declared type."""
+    def get(cls, key, default=None, campus_id=None):
+        """
+        Retrieve a config value cast to its declared type.
+        If campus_id is provided, checks for an active CampusConfigurationOverride first,
+        falling back to the institution default.
+        """
         try:
             obj = cls.objects.get(key=key)
+            if campus_id is not None:
+                override = CampusConfigurationOverride.objects.filter(
+                    campus_id=campus_id, config=obj, is_active=True
+                ).first()
+                if override is not None:
+                    return obj.cast_value(override.value)
             return obj.typed_value
         except cls.DoesNotExist:
             return default
 
+    def cast_value(self, raw_value):
+        """Cast any string value according to this config's declared value_type."""
+        import json
+        v = raw_value if raw_value is not None else ''
+        if self.value_type == self.ValueType.BOOLEAN:
+            return str(v).lower() in ('true', '1', 'yes')
+        elif self.value_type == self.ValueType.INTEGER:
+            try:
+                return int(v) if v else 0
+            except (ValueError, TypeError):
+                return 0
+        elif self.value_type == self.ValueType.FLOAT:
+            try:
+                return float(v) if v else 0.0
+            except (ValueError, TypeError):
+                return 0.0
+        elif self.value_type == self.ValueType.JSON:
+            try:
+                return json.loads(v) if v else {}
+            except Exception:
+                return {}
+        return v
+
     @property
     def typed_value(self):
         """Return value cast to the declared type."""
-        import json
-        v = self.value
-        if self.value_type == self.ValueType.BOOLEAN:
-            return v.lower() in ('true', '1', 'yes')
-        elif self.value_type == self.ValueType.INTEGER:
-            return int(v) if v else 0
-        elif self.value_type == self.ValueType.FLOAT:
-            return float(v) if v else 0.0
-        elif self.value_type == self.ValueType.JSON:
-            return json.loads(v) if v else {}
-        return v
+        return self.cast_value(self.value)
+
+
+class CampusConfigurationOverride(models.Model):
+    """
+    Campus-level configuration override for a SystemConfiguration key.
+    Implements explicit 3-tier inheritance:
+      1. Institution Default (SystemConfiguration.value)
+      2. Campus Override (CampusConfigurationOverride.value)
+      3. Effective Resolved Configuration for active campus
+    """
+    campus = models.ForeignKey(
+        'workforce.Campus',
+        on_delete=models.CASCADE,
+        related_name='config_overrides',
+        help_text='Campus that overrides the institution default'
+    )
+    config = models.ForeignKey(
+        SystemConfiguration,
+        on_delete=models.CASCADE,
+        related_name='campus_overrides',
+        help_text='The institution-wide configuration key being overridden'
+    )
+    value = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    notes = models.CharField(max_length=255, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='campus_config_overrides'
+    )
+
+    class Meta:
+        db_table = 'core_campus_config_override'
+        unique_together = ('campus', 'config')
+        ordering = ['campus', 'config__group', 'config__display_order']
+        verbose_name = 'Campus Configuration Override'
+        verbose_name_plural = 'Campus Configuration Overrides'
+
+    def __str__(self):
+        return f"{self.campus.code}: {self.config.key} = {self.value}"
+
+    @property
+    def typed_value(self):
+        return self.config.cast_value(self.value)
 
 # ============================================================================
 # SUBSCRIPTION & BILLING
@@ -474,9 +631,34 @@ class BillingCycle(models.Model):
         return f"Billing Cycle: {self.month.strftime('%B %Y')}"
 
 import uuid
+from django.db import transaction, IntegrityError
+
+class SyncTenantCursor(models.Model):
+    id = models.IntegerField(primary_key=True, default=1)
+    current_value = models.BigIntegerField(default=0)
+
+    @classmethod
+    def allocate_cursor(cls):
+        try:
+            cursor = cls.objects.select_for_update().get(id=1)
+        except cls.DoesNotExist:
+            try:
+                with transaction.atomic():
+                    cursor = cls.objects.create(id=1, current_value=0)
+            except IntegrityError:
+                cursor = cls.objects.select_for_update().get(id=1)
+
+        cursor.current_value += 1
+        cursor.save(update_fields=['current_value'])
+        return cursor.current_value
+
+class SyncOutboxManager(models.Manager):
+    def bulk_create(self, objs, **kwargs):
+        raise NotImplementedError("bulk_create is prohibited for SyncOutbox to guarantee strict cursor ordering.")
 
 class SyncOutbox(models.Model):
     sequence_number = models.BigAutoField(primary_key=True)
+    ordered_cursor = models.BigIntegerField(null=True, unique=True, db_index=True)
     event_id = models.UUIDField(default=uuid.uuid4, editable=False)
     sync_id = models.UUIDField(db_index=True)
     model_name = models.CharField(max_length=150)
@@ -486,8 +668,19 @@ class SyncOutbox(models.Model):
     schema_version = models.CharField(max_length=10, default='1.0')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
+    objects = SyncOutboxManager()
+
     class Meta:
-        ordering = ['sequence_number']
+        ordering = ['ordered_cursor', 'sequence_number']
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.ordered_cursor is None:
+            if not transaction.get_autocommit():
+                self.ordered_cursor = SyncTenantCursor.allocate_cursor()
+            else:
+                with transaction.atomic():
+                    self.ordered_cursor = SyncTenantCursor.allocate_cursor()
+        super().save(*args, **kwargs)
 
 
 class SyncProcessedEvent(models.Model):

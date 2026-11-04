@@ -16,7 +16,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet, ModelViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import InstitutionProfile, AuditLog, SystemConfiguration
+from .models import InstitutionProfile, AuditLog, SystemConfiguration, CampusConfigurationOverride
 
 
 # ---------------------------------------------------------------------------
@@ -35,13 +35,12 @@ class InstitutionProfileSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         # Convert empty string dates to None before field-level validation
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
         if 'established_date' in data and data['established_date'] == '':
-            data = data.copy()
             data['established_date'] = None
         # Convert null to empty string for text fields that don't allow null in DB
-        for field in ('email', 'website', 'portal_url'):
+        for field in ('email', 'website', 'portal_url', 'phone', 'phone_alt', 'postal_address', 'display_name', 'registered_name'):
             if field in data and data[field] is None:
-                data = data.copy() if not isinstance(data, dict) else data
                 data[field] = ''
         return super().to_internal_value(data)
 
@@ -236,7 +235,52 @@ class SystemConfigurationSerializer(serializers.ModelSerializer):
         read_only_fields = ['key', 'value_type', 'group', 'label', 'description',
                             'is_editable', 'display_order', 'updated_at']
 
+    def _mask_if_secret(self, instance, raw_val):
+        if raw_val is None:
+            return None
+        if instance.value_type == SystemConfiguration.ValueType.SECRET and raw_val:
+            return '••••••••' + raw_val[-4:] if len(raw_val) > 4 else '••••'
+        return raw_val
+
     def to_representation(self, instance):
+        data = super().to_representation(instance)
+        inst_default = self._mask_if_secret(instance, instance.value)
+        data['institution_default_value'] = inst_default
+        data['campus_override_value'] = None
+        data['effective_value'] = inst_default
+        data['is_overridden'] = False
+        data['override_id'] = None
+        data['campus_id'] = None
+
+        request = self.context.get('request')
+        campus_id = self.context.get('campus_id')
+        if campus_id is None and request is not None:
+            raw_scope = request.query_params.get('scope', '')
+            if raw_scope != 'institution':
+                from .campus_filter import get_effective_campus_id
+                campus_id = get_effective_campus_id(request)
+
+        if campus_id:
+            data['campus_id'] = int(campus_id)
+            overrides_map = self.context.get('overrides_map')
+            override = overrides_map.get(instance.id) if overrides_map is not None else (
+                CampusConfigurationOverride.objects.filter(
+                    campus_id=campus_id, config=instance, is_active=True
+                ).first()
+            )
+            if override is not None:
+                masked_ov = self._mask_if_secret(instance, override.value)
+                data['campus_override_value'] = masked_ov
+                data['effective_value'] = masked_ov
+                data['value'] = masked_ov
+                data['is_overridden'] = True
+                data['override_id'] = override.id
+                return data
+
+        data['value'] = inst_default
+        return data
+
+    def _legacy_to_rep(self, instance):
         data = super().to_representation(instance)
         # Mask secrets — only show last 4 chars
         if instance.value_type == SystemConfiguration.ValueType.SECRET and instance.value:
@@ -255,6 +299,20 @@ class SystemConfigurationViewSet(ModelViewSet):
     filterset_fields = ['group']
     http_method_names = ['get', 'patch', 'head', 'options']
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        raw_scope = self.request.query_params.get('scope', '')
+        if raw_scope != 'institution':
+            from .campus_filter import get_effective_campus_id
+            cid = get_effective_campus_id(self.request)
+            if cid:
+                ctx['campus_id'] = cid
+                ctx['overrides_map'] = {
+                    ov.config_id: ov
+                    for ov in CampusConfigurationOverride.objects.filter(campus_id=cid, is_active=True)
+                }
+        return ctx
+
     def get_queryset(self):
         return SystemConfiguration.objects.all()
 
@@ -264,7 +322,164 @@ class SystemConfigurationViewSet(ModelViewSet):
 
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
+def restore_default_config(request):
+    """
+    Restore a campus configuration override back to the institution-wide default.
+    Body: { "key": "grading_pass_mark", "campus_id": 1 }
+    """
+    from .campus_filter import get_effective_campus_id, is_user_institution_admin, get_user_allowed_campus_ids
+    key = request.data.get('key')
+    campus_id = request.data.get('campus_id') or get_effective_campus_id(request)
+    if not key or not campus_id:
+        return Response({'error': 'Both key and campus_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        campus_id = int(campus_id)
+    except (ValueError, TypeError):
+        return Response({'error': 'Invalid campus_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not is_user_institution_admin(request.user):
+        allowed_ids = get_user_allowed_campus_ids(request.user)
+        if campus_id not in allowed_ids:
+            return Response({'error': 'You do not have permission to manage settings for this campus.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        cfg = SystemConfiguration.objects.get(key=key)
+    except SystemConfiguration.DoesNotExist:
+        return Response({'error': f'Configuration key "{key}" not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    ov = CampusConfigurationOverride.objects.filter(campus_id=campus_id, config=cfg, is_active=True).first()
+    if ov:
+        old_val = ov.value
+        ov.is_active = False
+        ov.updated_by = request.user
+        ov.save(update_fields=['is_active', 'updated_by', 'updated_at'])
+        try:
+            AuditLog.objects.create(
+                user=request.user,
+                username=request.user.username,
+                action='UPDATE',
+                module='core',
+                model_name='CampusConfigurationOverride',
+                object_id=str(ov.id),
+                object_repr=f"{key} (Campus #{campus_id}) restored to default",
+                changes={'previous_override': old_val, 'restored_default': cfg.value},
+                description=f"Restored campus #{campus_id} setting '{key}' to institution default.",
+            )
+        except Exception:
+            pass
+
+    return Response({
+        'restored': True,
+        'key': key,
+        'campus_id': campus_id,
+        'institution_default_value': cfg.value,
+        'effective_value': cfg.value,
+        'is_overridden': False,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
 def bulk_update_config(request):
+    """
+    Bulk update multiple config keys at once.
+    Supports institution-wide updates (when campus_id is omitted/all and scope='institution')
+    and campus-level overrides (when campus_id is provided or active).
+    """
+    from .campus_filter import get_effective_campus_id, is_user_institution_admin, get_user_allowed_campus_ids
+    configs = request.data.get('configs', {})
+    if not isinstance(configs, dict):
+        return Response({'error': 'configs must be a dict'}, status=status.HTTP_400_BAD_REQUEST)
+
+    raw_scope = request.data.get('scope', '')
+    raw_cid = request.data.get('campus_id')
+    if raw_scope == 'institution':
+        campus_id = None
+    elif raw_cid is not None and str(raw_cid).lower() not in ('', 'all', 'null', 'none'):
+        try:
+            campus_id = int(raw_cid)
+        except (ValueError, TypeError):
+            campus_id = None
+    else:
+        campus_id = get_effective_campus_id(request)
+
+    if campus_id is None and not is_user_institution_admin(request.user):
+        return Response(
+            {'error': 'Only Institution Administrators can modify institution-wide default settings.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    if campus_id is not None and not is_user_institution_admin(request.user):
+        allowed_ids = get_user_allowed_campus_ids(request.user)
+        if campus_id not in allowed_ids:
+            return Response(
+                {'error': 'You are not authorized to modify settings for this campus.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+    updated = []
+    for key, value in configs.items():
+        try:
+            obj = SystemConfiguration.objects.get(key=key)
+            if not obj.is_editable:
+                continue
+            # Skip masked secrets that were not modified
+            if obj.value_type == SystemConfiguration.ValueType.SECRET and str(value).startswith('••••'):
+                continue
+
+            if campus_id is not None:
+                ov, _ = CampusConfigurationOverride.objects.update_or_create(
+                    campus_id=campus_id,
+                    config=obj,
+                    defaults={
+                        'value': str(value),
+                        'is_active': True,
+                        'updated_by': request.user,
+                    }
+                )
+                updated.append(key)
+                try:
+                    AuditLog.objects.create(
+                        user=request.user,
+                        username=request.user.username,
+                        action='UPDATE',
+                        module='core',
+                        model_name='CampusConfigurationOverride',
+                        object_id=str(ov.id),
+                        object_repr=f"{key} override for Campus #{campus_id}",
+                        changes={'override_value': str(value), 'institution_default': obj.value},
+                        description=f"Updated campus #{campus_id} override for '{key}'.",
+                    )
+                except Exception:
+                    pass
+            else:
+                old_val = obj.value
+                obj.value = str(value)
+                obj.updated_by = request.user
+                obj.save()
+                updated.append(key)
+                try:
+                    AuditLog.objects.create(
+                        user=request.user,
+                        username=request.user.username,
+                        action='UPDATE',
+                        module='core',
+                        model_name='SystemConfiguration',
+                        object_id=str(obj.id),
+                        object_repr=f"Institution Default: {key}",
+                        changes={'old': old_val, 'new': str(value)},
+                        description=f"Updated institution default for '{key}'.",
+                    )
+                except Exception:
+                    pass
+        except SystemConfiguration.DoesNotExist:
+            pass
+
+    return Response({'updated': updated, 'count': len(updated), 'campus_id': campus_id})
+
+
+def _legacy_bulk_update_config(request):
     """
     Bulk update multiple config keys at once.
     Body: { "configs": { "mpesa_consumer_key": "abc", "mpesa_shortcode": "174379" } }

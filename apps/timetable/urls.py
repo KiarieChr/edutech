@@ -10,7 +10,7 @@ from .views import (
     # API views
     ConflictCheckView, SchedulingView, AnalyticsView,
     ClassTimetableView, TeacherTimetableView, RoomTimetableView,
-    GenerateForTermView, MonthlyTimetableView,
+    GenerateForTermView, MonthlyTimetableView, TimetableExportPDFView,
 )
 
 router = DefaultRouter()
@@ -47,4 +47,7 @@ urlpatterns = [
     # Batch scheduling & Calendar views
     path('generate-for-term/', GenerateForTermView.as_view(), name='generate-for-term'),
     path('monthly-view/', MonthlyTimetableView.as_view(), name='monthly-view'),
+    
+    # PDF Export
+    path('export-pdf/', TimetableExportPDFView.as_view(), name='export-pdf'),
 ]

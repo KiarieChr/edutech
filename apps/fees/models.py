@@ -44,6 +44,22 @@ class FeeStructure(models.Model):
         related_name='fee_structures',
         help_text="Required for CBC/8-4-4 differentiated billing"
     )
+    campus = models.ForeignKey(
+        'workforce.Campus',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='fee_structures',
+        help_text="Campus this fee structure applies to (null = institution-wide default)"
+    )
+    source_template = models.ForeignKey(
+        'fees.FeeTemplate',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='derived_structures',
+        help_text="Shared fee template this structure was adopted from"
+    )
+    effective_from = models.DateField(null=True, blank=True, help_text="Effective start date for this fee structure")
+    effective_to = models.DateField(null=True, blank=True, help_text="Effective end date for this fee structure")
     
     currency = models.CharField(max_length=10, default='KES')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
@@ -54,13 +70,14 @@ class FeeStructure(models.Model):
 
     class Meta:
         ordering = ['-academic_year', 'grade', 'term']
-        unique_together = ['academic_year', 'term', 'grade', 'curriculum']
+        unique_together = ['academic_year', 'term', 'grade', 'curriculum', 'campus']
         verbose_name = _('Fee Structure')
         verbose_name_plural = _('Fee Structures')
 
     def __str__(self):
         curr = f" - {self.curriculum}" if self.curriculum else ""
-        return f"{self.grade} {self.term} ({self.academic_year}){curr} [{self.status}]"
+        camp = f" @ {self.campus.code}" if self.campus else " (Institution)"
+        return f"{self.grade} {self.term} ({self.academic_year}){curr}{camp} [{self.status}]"
 
     @property
     def total_amount(self):
@@ -509,6 +526,19 @@ class FeeTemplate(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
     currency = models.CharField(max_length=10, default='KES')
     
+    # Multi-Campus Scoping: NULL = Shared Institution-Wide Template; set = Campus-Specific Template
+    campus = models.ForeignKey(
+        'workforce.Campus',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='fee_templates',
+        help_text="Campus this template belongs to. Leave blank for shared institution-wide template."
+    )
+    is_shared_template = models.BooleanField(
+        default=True,
+        help_text="True if this is an institution-wide shared template that campuses can adopt."
+    )
+
     # Template inheritance for year rollover
     parent_template = models.ForeignKey(
         'self',
@@ -558,6 +588,7 @@ class FeeTemplate(models.Model):
                     status='ACTIVE',
                     term=self.term,
                     academic_year=self.academic_year,
+                    campus=self.campus,
                 ).exclude(pk=self.pk)
                 
                 for other in conflicts:
@@ -588,7 +619,7 @@ class FeeTemplate(models.Model):
             self.clean()
         super().save(*args, **kwargs)
 
-    def clone_to(self, target_year, target_term, percentage_increase=0, user=None):
+    def clone_to(self, target_year, target_term, percentage_increase=0, user=None, target_campus=None):
         """
         Clone this template to a new year/term with optional price increase.
         Returns the new FeeTemplate.
@@ -602,6 +633,8 @@ class FeeTemplate(models.Model):
             curriculum=self.curriculum,
             term=target_term,
             academic_year=target_year,
+            campus=target_campus if target_campus is not None else self.campus,
+            is_shared_template=(target_campus is None and self.campus is None),
             status='DRAFT',
             currency=self.currency,
             parent_template=self,

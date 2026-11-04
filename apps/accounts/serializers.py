@@ -272,6 +272,15 @@ class UserSerializer(serializers.ModelSerializer):
     employee_id = serializers.IntegerField(source='employee_profile.id', read_only=True, allow_null=True)
     employee_no = serializers.CharField(source='employee_profile.employee_no', read_only=True, allow_null=True)
     employee_name = serializers.SerializerMethodField(read_only=True)
+    campus_id = serializers.SerializerMethodField(read_only=True)
+    campus_name = serializers.SerializerMethodField(read_only=True)
+    is_multi_campus_admin = serializers.SerializerMethodField(read_only=True)
+    is_institution_admin = serializers.SerializerMethodField(read_only=True)
+    is_campus_admin = serializers.SerializerMethodField(read_only=True)
+    can_view_all_campuses = serializers.SerializerMethodField(read_only=True)
+    assigned_campus_ids = serializers.SerializerMethodField(read_only=True)
+    assigned_campus = serializers.SerializerMethodField(read_only=True)
+    allowed_campuses = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = User
@@ -281,9 +290,60 @@ class UserSerializer(serializers.ModelSerializer):
             'is_active', 'gender', 'phone', 'address', 'picture', 'picture_url',
             'is_first_login', 'date_joined', 'last_login', 'profile_url', 'role',
             'tenants', 'groups', 'group_ids', 'permissions', 'enabled_modules', 'session_timeout',
-            'employee_id', 'employee_no', 'employee_name'
+            'employee_id', 'employee_no', 'employee_name',
+            'campus_id', 'campus_name', 'is_multi_campus_admin',
+            'is_institution_admin', 'is_campus_admin', 'can_view_all_campuses',
+            'assigned_campus_ids', 'assigned_campus', 'allowed_campuses'
         ]
         read_only_fields = ['date_joined', 'last_login', 'is_superuser']
+
+    def get_campus_id(self, obj):
+        return obj.campus_id
+
+    def get_campus_name(self, obj):
+        campus = obj.campus
+        return campus.name if campus else None
+
+    def get_is_multi_campus_admin(self, obj):
+        return obj.is_multi_campus_admin
+
+    def get_is_institution_admin(self, obj):
+        return getattr(obj, 'is_institution_admin', obj.is_multi_campus_admin)
+
+    def get_is_campus_admin(self, obj):
+        return getattr(obj, 'is_campus_admin', obj.is_multi_campus_admin)
+
+    def get_can_view_all_campuses(self, obj):
+        return getattr(obj, 'can_view_all_campuses', obj.is_multi_campus_admin)
+
+    def get_assigned_campus_ids(self, obj):
+        if hasattr(obj, 'get_allowed_campus_ids'):
+            return obj.get_allowed_campus_ids()
+        return [obj.campus_id] if obj.campus_id else []
+        return obj.is_multi_campus_admin
+
+    def get_assigned_campus(self, obj):
+        campus = obj.get_assigned_campus()
+        if campus:
+            return {
+                'id': campus.id,
+                'name': campus.name,
+                'code': getattr(campus, 'code', '')
+            }
+        return None
+
+    def get_allowed_campuses(self, obj):
+        try:
+            return [
+                {
+                    'id': c.id,
+                    'name': c.name,
+                    'code': getattr(c, 'code', '')
+                }
+                for c in obj.allowed_campuses
+            ]
+        except Exception:
+            return []
 
     def get_enabled_modules(self, obj):
         try:
@@ -300,6 +360,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_permissions(self, obj):
         return list(obj.get_all_permissions())
+
 
     def get_tenants(self, obj):
         return [

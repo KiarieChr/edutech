@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from core.campus_filter import CampusFilterBackend, get_request_campus_id
 
 from .models import (
     PurchaseRequisition, RequisitionLine,
@@ -405,13 +406,24 @@ class SupplierQuotationViewSet(viewsets.ReadOnlyModelViewSet):
 
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     queryset = PurchaseOrder.objects.select_related(
-        'supplier', 'requisition', 'rfq', 'quotation', 'contract',
+        'supplier', 'campus', 'requisition', 'rfq', 'quotation', 'contract',
         'approved_by', 'created_by'
     ).prefetch_related('lines')
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'supplier']
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter, CampusFilterBackend]
+    filterset_fields = ['status', 'supplier', 'campus']
     search_fields = ['po_number', 'notes']
     ordering_fields = ['created_at', 'order_date', 'total_amount']
+
+    def perform_create(self, serializer):
+        campus_id = (
+            self.request.data.get('campus_id')
+            or self.request.data.get('campus')
+            or get_request_campus_id(self.request)
+        )
+        kwargs = {'created_by': self.request.user}
+        if campus_id:
+            kwargs['campus_id'] = campus_id
+        serializer.save(**kwargs)
 
     def get_serializer_class(self):
         if self.action == 'list':

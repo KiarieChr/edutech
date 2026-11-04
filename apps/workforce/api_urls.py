@@ -64,11 +64,40 @@ router.register(r'performance-metrics', PerformanceMetricViewSet, basename='perf
 router.register(r'appraisal-cycles', AppraisalCycleViewSet, basename='appraisal-cycle')
 router.register(r'employee-appraisals', EmployeeAppraisalViewSet, basename='employee-appraisal')
 router.register(r'performance-goals', EmployeePerformanceGoalViewSet, basename='performance-goal')
+router.register(r'employee-contracts', EmployeeContractViewSet, basename='employee-contract')
 
+from .views_documents import (
+    WorkforcePayslipDocumentView,
+    WorkforceContractDocumentView,
+    WorkforceP9DocumentView,
+)
 
 urlpatterns = [
     # API endpoints
     path('api/', include(router.urls)),
+    path('', include(router.urls)),
+
+    # ========================================================================
+    # DOCUMENT STUDIO WEASYPRINT PDF ENDPOINTS (Milestone 1)
+    # ========================================================================
+    path('documents/payslip/<int:calculation_id>/', 
+         WorkforcePayslipDocumentView.as_view(), 
+         name='workforce-payslip-doc'),
+    path('documents/contract/<int:contract_id>/', 
+         WorkforceContractDocumentView.as_view(), 
+         name='workforce-contract-doc'),
+    path('documents/p9/<int:employee_id>/', 
+         WorkforceP9DocumentView.as_view(), 
+         name='workforce-p9-doc'),
+    path('api/documents/payslip/<int:calculation_id>/', 
+         WorkforcePayslipDocumentView.as_view(), 
+         name='workforce-payslip-doc-api'),
+    path('api/documents/contract/<int:contract_id>/', 
+         WorkforceContractDocumentView.as_view(), 
+         name='workforce-contract-doc-api'),
+    path('api/documents/p9/<int:employee_id>/', 
+         WorkforceP9DocumentView.as_view(), 
+         name='workforce-p9-doc-api'),
 
     # ========================================================================
     # PDF REPORTS

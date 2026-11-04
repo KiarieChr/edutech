@@ -132,6 +132,12 @@ class Room(models.Model):
         ('online',    'Online / Virtual'),
     )
 
+    ASSIGNMENT_MODE_CHOICES = (
+        ('dedicated', 'Dedicated'),
+        ('preferred', 'Preferred'),
+        ('shared',    'Shared'),
+    )
+
     name = models.CharField(max_length=80)
     room_type = models.CharField(max_length=20, choices=ROOM_TYPE_CHOICES, default='classroom')
     # campus FK is optional — for single-campus schools this can be null
@@ -144,6 +150,23 @@ class Room(models.Model):
     capacity = models.PositiveSmallIntegerField(default=40)
     is_active = models.BooleanField(default=True)
     notes = models.CharField(max_length=255, blank=True)
+
+    assigned_grades = models.ManyToManyField(
+        'student_settings.GradeStructure',
+        blank=True,
+        related_name='assigned_rooms',
+        help_text="Grades assigned to this room for dedicated or preferred usage."
+    )
+    assignment_mode = models.CharField(
+        max_length=20,
+        choices=ASSIGNMENT_MODE_CHOICES,
+        default='shared',
+        help_text="Assignment mode: dedicated, preferred, or shared."
+    )
+    is_active_for_scheduling = models.BooleanField(
+        default=True,
+        help_text="Controls if room is available for automatic and manual scheduling."
+    )
 
     class Meta:
         ordering = ['name']
@@ -597,8 +620,12 @@ class WorkAllocation(models.Model):
         return min(100, round((self.scheduled_lessons / self.lessons_per_week) * 100, 1))
 
     def __str__(self):
+        t_name = getattr(self.teacher, 'get_full_name', None)
+        if callable(t_name):
+            t_name = t_name()
+        teacher_display = t_name or self.teacher.username
         return (
-            f"{self.teacher.get_full_name() or self.teacher.username} → "
+            f"{teacher_display} → "
             f"{self.subject.code} → {self.class_session.name} "
             f"({self.scheduled_lessons}/{self.lessons_per_week} lessons)"
         )
@@ -733,11 +760,16 @@ class TeacherAvailability(models.Model):
         else:
             time_str = "Unspecified time"
 
+        t_name = getattr(self.teacher, 'get_full_name', None)
+        if callable(t_name):
+            t_name = t_name()
+        teacher_display = t_name or self.teacher.username
+
         if self.recurrence == 'weekly':
             day_str = dict(TimetableSlot.DAY_OF_WEEK_CHOICES).get(self.day_of_week, '')
-            return f"{self.teacher.get_full_name() or self.teacher.username}: {self.get_availability_type_display()} on {day_str} {time_str}"
+            return f"{teacher_display}: {self.get_availability_type_display()} on {day_str} {time_str}"
         else:
-            return f"{self.teacher.get_full_name() or self.teacher.username}: {self.get_availability_type_display()} ({self.recurrence})"
+            return f"{teacher_display}: {self.get_availability_type_display()} ({self.recurrence})"
 
 
 class TimetableLock(models.Model):

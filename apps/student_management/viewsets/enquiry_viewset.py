@@ -10,7 +10,10 @@ from student_management.serializers.enquiry import (
 )
 
 
-class EnquiryViewSet(viewsets.ModelViewSet):
+from core.campus_filter import CampusPermissionMixin, CampusFilterBackend, get_effective_campus_id
+
+
+class EnquiryViewSet(CampusPermissionMixin, viewsets.ModelViewSet):
     """
     CRUD + convert action for pre-application enquiries.
 
@@ -26,7 +29,7 @@ class EnquiryViewSet(viewsets.ModelViewSet):
         'intake', 'curriculum', 'grade', 'campus', 'assigned_to', 'converted_application'
     )
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter, CampusFilterBackend]
     search_fields = ['full_name', 'child_name', 'phone_number', 'email']
     ordering_fields = ['created_at', 'follow_up_date', 'status']
     ordering = ['-created_at']
@@ -55,14 +58,14 @@ class EnquiryViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         status_param = self.request.query_params.get('status')
-        campus_id = self.request.query_params.get('campus_id')
         intake_id = self.request.query_params.get('intake_id')
         assigned_to_me = self.request.query_params.get('assigned_to_me')
 
         if status_param:
             qs = qs.filter(status=status_param)
-        if campus_id:
-            qs = qs.filter(campus_id=campus_id)
+        effective_campus_id = get_effective_campus_id(self.request)
+        if effective_campus_id:
+            qs = qs.filter(campus_id=effective_campus_id)
         if intake_id:
             qs = qs.filter(intake_id=intake_id)
         if assigned_to_me and assigned_to_me.lower() == 'true':

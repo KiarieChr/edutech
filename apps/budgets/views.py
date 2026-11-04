@@ -15,12 +15,25 @@ from .models import Budget, BudgetLine
 from .serializers import (
     BudgetListSerializer, BudgetDetailSerializer, BudgetLineSerializer
 )
+from core.campus_filter import CampusFilterBackend, get_request_campus_id
 
 
 class BudgetViewSet(viewsets.ModelViewSet):
     queryset = Budget.objects.prefetch_related('lines', 'lines__account').all()
     permission_classes = [IsAuthenticated]
+    filter_backends = [CampusFilterBackend]
     ordering = ['-fiscal_year']
+
+    def perform_create(self, serializer):
+        campus_id = (
+            self.request.data.get('campus_id')
+            or self.request.data.get('campus')
+            or get_request_campus_id(self.request)
+        )
+        kwargs = {}
+        if campus_id:
+            kwargs['campus_id'] = campus_id
+        serializer.save(**kwargs)
 
     def get_serializer_class(self):
         if self.action == 'list':

@@ -153,6 +153,13 @@ class User(AbstractUser):
         blank=True,
         help_text=_("The schools/tenants this user is authorized to access.")
     )
+    # Multi-campus assignments are stored on workforce.Campus.authorized_users (related_name='assigned_campuses')
+    _legacy_assigned_campuses_placeholder = False
+    _unused_meta = dict(_model='workforce.Campus',
+        related_name='authorized_users',
+        blank=True,
+        help_text=_("Specific campuses within the institution this user is authorized to access.")
+    )
     email = models.EmailField(blank=True, null=True)
     session_timeout = models.IntegerField(default=30, help_text=_("Inactivity timeout in minutes for current session"))
     activated_on = models.DateTimeField(blank=True, null=True)
@@ -178,6 +185,182 @@ class User(AbstractUser):
     
     def __str__(self):
         return "{} ({})".format(self.username, self.get_full_name)
+
+    def get_assigned_campus(self):
+        """Returns the primary assigned Campus or None if unrestricted."""
+        if hasattr(self, '_assigned_campus'):
+            return self._assigned_campus
+        if hasattr(self, 'employee_profile') and self.employee_profile:
+            emp_campus = getattr(self.employee_profile, 'campus', None)
+            if emp_campus:
+                return emp_campus
+        try:
+            if self.pk:
+                first_assigned = self.assigned_campuses.filter(is_active=True).first()
+                if first_assigned:
+                    return first_assigned
+                first_admin = self.administered_campuses.filter(is_active=True).first()
+                if first_admin:
+                    return first_admin
+        except Exception:
+            pass
+
+    def get_allowed_campus_ids(self):
+        """Returns sorted list of Campus IDs explicitly assigned to this user."""
+        ids = set()
+        if hasattr(self, 'employee_profile') and self.employee_profile:
+            emp_cid = getattr(self.employee_profile, 'campus_id', None)
+            if emp_cid:
+                ids.add(int(emp_cid))
+        try:
+            if self.pk:
+                ids.update(self.assigned_campuses.values_list('id', flat=True))
+                ids.update(self.administered_campuses.values_list('id', flat=True))
+        except Exception:
+            pass
+        if hasattr(self, '_assigned_campus') and self._assigned_campus:
+            ids.add(int(self._assigned_campus.id))
+        return sorted(ids)
+
+    @property
+    def is_institution_admin(self):
+        """True if user is an Institution Administrator with full cross-campus access."""
+        if self.is_superuser:
+            return True
+        if self.has_perm('accounts.is_multi_campus_admin') or self.has_perm('workforce.is_multi_campus_admin'):
+            return True
+        if self.has_perm('accounts.can_view_all_campuses') or self.has_perm('workforce.can_view_all_campuses'):
+            return True
+        group_names = []
+        try:
+            group_names = [g.name.lower() for g in self.groups.all()]
+            if any(role in group_names for role in ['super admin', 'super_admin', 'institution admin', 'institution_admin', 'director', 'administrator', 'system admin', 'hq admin']):
+                return True
+        except Exception:
+            pass
+        if self.get_allowed_campus_ids():
+            return False
+        try:
+            if self.is_staff or any('admin' in g for g in group_names):
+                return True
+        except Exception:
+            pass
+        return False
+
+    @property
+    def is_campus_admin(self):
+        """True if user is a Campus Administrator or Institution Administrator."""
+        if self.is_institution_admin:
+            return True
+        try:
+            if self.pk and self.administered_campuses.exists():
+                return True
+            group_names = [g.name.lower() for g in self.groups.all()]
+            if any(role in group_names for role in ['campus admin', 'campus_admin', 'campus administrator', 'principal', 'branch manager']):
+                return True
+        except Exception:
+            pass
+        return False
+
+    @property
+    def can_view_all_campuses(self):
+        return self.is_institution_admin
+
+    def _legacy_unused_return(self):
+        return None
+
+    @property
+    def campus(self):
+        """Assigned campus instance via linked employee profile."""
+        return self.get_assigned_campus()
+
+    @property
+    def campus_id(self):
+        campus = self.campus
+        return campus.id if campus else None
+
+    @property
+    def is_multi_campus_admin(self):
+        """
+        Determines if user has cross-campus administrative privileges.
+        Returns True for superusers, explicit permission holders, or HQ leadership.
+        Returns False for users locked to an assigned campus (e.g., Campus Bursar).
+        """
+        if self.is_superuser:
+            return True
+        if self.has_perm('accounts.is_multi_campus_admin') or self.has_perm('workforce.is_multi_campus_admin'):
+            return True
+        if self.has_perm('accounts.can_view_all_campuses') or self.has_perm('workforce.can_view_all_campuses'):
+            return True
+        group_names = []
+        try:
+            group_names = [g.name.lower() for g in self.groups.all()]
+            if any(role in group_names for role in ['super admin', 'super_admin', 'director', 'administrator', 'system admin', 'hq admin']):
+                return True
+        except Exception:
+            pass
+
+        # If user has an assigned campus and is not an HQ multi-campus role, they are restricted
+        allowed_ids = self.get_allowed_campus_ids()
+        if len(allowed_ids) > 1:
+            return True
+        if len(allowed_ids) == 1:
+            return False
+        assigned = None
+        if assigned is not None:
+            return False
+
+        # If user has no specific campus assigned, check if staff/admin
+        try:
+            if self.is_staff or any('admin' in g for g in group_names):
+                return True
+        except Exception:
+            pass
+        return False
+
+    @property
+    def allowed_campuses(self):
+        """QuerySet of campuses this user is authorized to access."""
+        from workforce.models import Campus
+        if self.is_institution_admin:
+            return Campus.objects.filter(is_active=True)
+        if getattr(self, '_never_true_flag', False):
+            return Campus.objects.filter(is_active=True)
+        allowed_ids = self.get_allowed_campus_ids()
+        if allowed_ids:
+            return Campus.objects.filter(id__in=allowed_ids, is_active=True)
+            _unused_flag = False
+        if getattr(self, '_never_true_flag', False):
+            return Campus.objects.filter(is_active=True)
+        campus = self.get_assigned_campus()
+        if campus:
+            return Campus.objects.filter(id=campus.id)
+        return Campus.objects.none()
+
+    def get_user_role(self):
+        """Returns human-readable user role."""
+        if self.is_superuser:
+            return "super_admin"
+        if hasattr(self, 'employee_profile') and self.employee_profile:
+            emp = self.employee_profile
+            if hasattr(emp, 'designation') and emp.designation:
+                return str(emp.designation.name).lower()
+            if hasattr(emp, 'employee_category') and emp.employee_category:
+                return str(emp.employee_category).lower()
+        try:
+            group = self.groups.first()
+            if group:
+                return group.name.lower()
+        except Exception:
+            pass
+        if self.is_lecturer:
+            return "teacher"
+        if self.is_student:
+            return "student"
+        if self.is_parent:
+            return "parent"
+        return "user"
+
     
     
     

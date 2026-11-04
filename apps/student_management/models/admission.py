@@ -19,7 +19,7 @@ class Admission(BaseModel):
         related_name='admission_record'
     )
     
-    admission_number = models.CharField(max_length=50, unique=True)
+    admission_number = models.CharField(max_length=50)
     admission_date = models.DateField()
     campus = models.ForeignKey(
         'workforce.Campus',
@@ -45,3 +45,15 @@ class Admission(BaseModel):
     class Meta:
         ordering = ['-admission_date']
         db_table = 'student_admissions'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['campus', 'admission_number'],
+                condition=models.Q(campus__isnull=False),
+                name='unique_admission_record_number_per_campus'
+            ),
+            models.UniqueConstraint(
+                fields=['admission_number'],
+                condition=models.Q(campus__isnull=True),
+                name='unique_admission_record_number_null_campus'
+            ),
+        ]

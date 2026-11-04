@@ -423,6 +423,7 @@ class SchedulingService:
             
             lessons_to_place = alloc.remaining
             placed_for_alloc = 0
+            last_room_unplaced_reason = None
             
             # Sort available slots by preference
             sorted_slots = self._rank_slots(
@@ -460,6 +461,21 @@ class SchedulingService:
                 
                 if not verify.is_valid:
                     continue
+
+                # Room selection respecting grade rules, room type, and capacity
+                room, room_reason = self._select_room(
+                    allocation_obj.subject,
+                    allocation_obj.class_session,
+                    slot['day_of_week'],
+                    period.start_time,
+                    period.end_time,
+                    preferences,
+                    allocation=allocation_obj,
+                )
+
+                if room is None:
+                    last_room_unplaced_reason = room_reason
+                    continue
                 
                 # Place the slot
                 if mode == SchedulingMode.SUGGESTIONS_ONLY:
@@ -472,15 +488,6 @@ class SchedulingService:
                     # Create the slot
                     try:
                         with transaction.atomic():
-                            room = self._select_room(
-                                allocation_obj.subject,
-                                allocation_obj.class_session,
-                                slot['day_of_week'],
-                                period.start_time,
-                                period.end_time,
-                                preferences,
-                            )
-                            
                             new_slot = self.TimetableSlot.objects.create(
                                 class_session=allocation_obj.class_session,
                                 subject=allocation_obj.subject,
@@ -504,6 +511,7 @@ class SchedulingService:
             
             # Track unplaced
             if placed_for_alloc < lessons_to_place:
+                reason = last_room_unplaced_reason if (last_room_unplaced_reason and placed_for_alloc == 0) else self._diagnose_unplaced(alloc, used_slots)
                 result.unplaced.append({
                     'allocation_id': alloc.allocation_id,
                     'subject': alloc.subject_name,
@@ -511,7 +519,7 @@ class SchedulingService:
                     'needed': lessons_to_place,
                     'placed': placed_for_alloc,
                     'remaining': lessons_to_place - placed_for_alloc,
-                    'reason': self._diagnose_unplaced(alloc, used_slots),
+                    'reason': reason,
                 })
                 result.success = False
         
@@ -559,28 +567,41 @@ class SchedulingService:
         start_time: time,
         end_time: time,
         preferences: SchedulingPreferences,
-    ):
-        """Select an appropriate room for the lesson."""
-        # Check preferences first
-        if subject.id in preferences.preferred_rooms:
-            try:
-                room = self.Room.objects.get(pk=preferences.preferred_rooms[subject.id])
-                # Verify availability
-                check = self.conflict_engine.check_slot_creation(
-                    class_session=class_session,
-                    subject=subject,
-                    teacher=None,  # We only care about room here
-                    room=room,
-                    day_of_week=day_of_week,
-                    start_time=start_time,
-                    end_time=end_time,
-                )
-                if check.is_valid:
-                    return room
-            except self.Room.DoesNotExist:
-                pass
-        
-        # Find any available room
+        allocation=None,
+    ) -> Tuple[Optional[Any], Optional[str]]:
+        """
+        Select an appropriate room for the lesson based on grade assignment rules,
+        required room type, capacity, and current bookings.
+
+        Rules:
+        1. Identify the grade of the class session being scheduled.
+        2. Determine the required room type (e.g., Laboratory, Classroom).
+        3. Filter available rooms based on Room.assignment_mode:
+           - 'dedicated': Strictly exclude if class_grade not in assigned_grades.
+           - 'preferred': Include. Prioritize if class_grade is in assigned_grades.
+           - 'shared': Include normally.
+        4. If no valid room found, return (None, reason).
+        """
+        class_grade = getattr(class_session, 'grade', None)
+        grade_name = class_grade.name if class_grade else "this grade"
+
+        required_room_type = getattr(allocation, 'required_room_type', None) if allocation else None
+        room_type_choices = dict(self.Room.ROOM_TYPE_CHOICES)
+        type_display = room_type_choices.get(required_room_type, required_room_type.capitalize() if required_room_type else "Room")
+
+        # Base query: must be active and active for scheduling
+        rooms_qs = self.Room.objects.filter(
+            is_active=True,
+            is_active_for_scheduling=True,
+        ).prefetch_related('assigned_grades')
+
+        if required_room_type:
+            rooms_qs = rooms_qs.filter(room_type=required_room_type)
+
+        if not rooms_qs.exists():
+            return None, f"No available {type_display} permitted for {grade_name}"
+
+        # Student count for capacity
         from academics.models import StudentSessionEnrollment
         try:
             student_count = StudentSessionEnrollment.objects.filter(
@@ -589,29 +610,63 @@ class SchedulingService:
                 status='active'
             ).count()
         except Exception:
-            student_count = 30  # Default
-        
-        # Get rooms with sufficient capacity
-        candidate_rooms = self.Room.objects.filter(
-            capacity__gte=student_count,
+            student_count = 30
+
+        # Filter occupied rooms
+        occupied_ids = set(self.TimetableSlot.objects.filter(
+            day_of_week=day_of_week,
             is_active=True,
-        ).order_by('capacity')  # Prefer smallest adequate room
-        
-        for room in candidate_rooms:
-            # Check room availability
-            conflict_check = self.TimetableSlot.objects.filter(
-                room=room,
-                day_of_week=day_of_week,
-                is_active=True,
-                start_time__lt=end_time,
-                end_time__gt=start_time,
-            ).exists()
-            
-            if not conflict_check:
-                return room
-        
-        # No room available, return None (room-less slot)
-        return None
+            start_time__lt=end_time,
+            end_time__gt=start_time,
+            room__isnull=False,
+        ).values_list('room_id', flat=True))
+
+        available_rooms = [r for r in rooms_qs if r.id not in occupied_ids]
+        if not available_rooms:
+            return None, f"All {type_display}s are occupied at {start_time:%H:%M}-{end_time:%H:%M}"
+
+        # Evaluate candidate rooms by assignment_mode
+        eligible_candidates = []
+        for r in available_rooms:
+            assigned_grade_ids = {g.id for g in r.assigned_grades.all()}
+            is_grade_assigned = (class_grade.id in assigned_grade_ids) if class_grade else False
+
+            if r.assignment_mode == 'dedicated':
+                if not is_grade_assigned:
+                    # Hard restriction: Room can ONLY be used by assigned grades
+                    continue
+                mode_score = 30
+            elif r.assignment_mode == 'preferred':
+                if is_grade_assigned:
+                    # Soft restriction: Assigned grades get priority
+                    mode_score = 40
+                else:
+                    # Others can use if empty, but lower priority than shared
+                    mode_score = 10
+            else:  # 'shared'
+                mode_score = 20
+
+            # Allocation preferred room bonus
+            pref_bonus = 0
+            if allocation and getattr(allocation, 'preferred_room_id', None) == r.id:
+                pref_bonus += 50
+            elif subject and preferences and getattr(preferences, 'preferred_rooms', None):
+                if preferences.preferred_rooms.get(subject.id) == r.id:
+                    pref_bonus += 50
+
+            # Smallest adequate room preferred
+            cap_diff = r.capacity - student_count
+            cap_penalty = -abs(cap_diff) * 0.1
+
+            total_score = mode_score * 100 + pref_bonus + cap_penalty
+            eligible_candidates.append((r, total_score))
+
+        if not eligible_candidates:
+            return None, f"No available {type_display} permitted for {grade_name}"
+
+        # Sort highest score first
+        eligible_candidates.sort(key=lambda x: x[1], reverse=True)
+        return eligible_candidates[0][0], None
     
     def _diagnose_unplaced(
         self,

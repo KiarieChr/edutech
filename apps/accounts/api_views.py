@@ -123,16 +123,22 @@ class DashboardStatsAPIView(APIView):
         }
         EVENT_COLORS = ['#4caf50', '#2196f3', '#009688', '#f44336', '#ff9800', '#9c27b0']
 
-        # ── 1. stat cards ────────────────────────────────────────
-        total_students = Student.objects.count()
-        active_students = Student.objects.filter(status='active').count()
+        # ── 1. stat cards (campus-scoped) ────────────────────────
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        student_base_qs = Student.objects.filter(campus_id=effective_cid) if effective_cid else Student.objects.all()
+        total_students = student_base_qs.count()
+        active_students = student_base_qs.filter(status='active').count()
+        total_students = student_base_qs.count()
+        active_students = student_base_qs.filter(status='active').count()
 
         # Attendance
         try:
             # pyrefly: ignore [missing-import]
             from student_management.models.class_session import SessionAttendance
-            att_today = SessionAttendance.objects.filter(date=today).count()
-            att_present = SessionAttendance.objects.filter(date=today, status='present').count()
+            att_base = SessionAttendance.objects.filter(student__campus_id=effective_cid) if effective_cid else SessionAttendance.objects.all()
+            att_today = att_base.filter(date=today).count()
+            att_present = att_base.filter(date=today, status='present').count()
             attendance_pct = round(att_present / att_today * 100, 1) if att_today else 0.0
         except Exception:
             attendance_pct = 0.0
@@ -141,10 +147,11 @@ class DashboardStatsAPIView(APIView):
         try:
             from fees.models import FeeInvoice
             month_start = today.replace(day=1)
-            paid_this_month = FeeInvoice.objects.filter(
+            inv_base = FeeInvoice.objects.filter(student__campus_id=effective_cid) if effective_cid else FeeInvoice.objects.all()
+            paid_this_month = inv_base.filter(
                 updated_at__date__gte=month_start
             ).aggregate(t=Sum('paid_amount'))['t'] or 0
-            fee_defaulters = FeeInvoice.objects.filter(
+            fee_defaulters = inv_base.filter(
                 balance__gt=0
             ).values('student').distinct().count()
         except Exception:
@@ -154,8 +161,10 @@ class DashboardStatsAPIView(APIView):
         # Staff
         try:
             from workforce.core_models import Employee
-            total_staff = Employee.objects.count()
-            active_staff = Employee.objects.filter(employment_status='active').count()
+            emp_base = Employee.objects.filter(campus_id=effective_cid) if effective_cid else Employee.objects.all()
+            total_staff = emp_base.count()
+            active_staff = emp_base.filter(employment_status='active').count()
+            active_staff = emp_base.filter(employment_status='active').count()
         except Exception:
             total_staff = 0
             active_staff = 0
@@ -163,13 +172,13 @@ class DashboardStatsAPIView(APIView):
         # Departments
         try:
             from workforce.models import Department
-            dept_count = Department.objects.count()
+            dept_count = (Department.objects.filter(campus_id=effective_cid) if effective_cid else Department.objects.all()).count()
         except Exception:
             dept_count = 0
 
         # New students this month
         month_start_dt = today.replace(day=1)
-        new_students_month = Student.objects.filter(
+        new_students_month = student_base_qs.filter(
             admission_date__gte=month_start_dt
         ).count()
 
@@ -209,8 +218,9 @@ class DashboardStatsAPIView(APIView):
             day_date = week_start + timedelta(days=i)
             try:
                 from student_management.models.class_session import SessionAttendance
-                present = SessionAttendance.objects.filter(date=day_date, status='present').count()
-                absent = SessionAttendance.objects.filter(date=day_date, status='absent').count()
+                att_w_base = SessionAttendance.objects.filter(student__campus_id=effective_cid) if effective_cid else SessionAttendance.objects.all()
+                present = att_w_base.filter(date=day_date, status='present').count()
+                absent = att_w_base.filter(date=day_date, status='absent').count()
             except Exception:
                 present, absent = 0, 0
             weekly_attendance.append({"name": label, "present": present, "absent": absent})
@@ -225,8 +235,10 @@ class DashboardStatsAPIView(APIView):
             if current_term:
                 current_term_name = f"{current_term.name}, {current_term.academic_year.name}"
                 inv_qs = FeeInvoice.objects.filter(term=current_term)
+                if effective_cid:
+                    inv_qs = inv_qs.filter(student__campus_id=effective_cid)
             else:
-                inv_qs = FeeInvoice.objects.all()
+                inv_qs = FeeInvoice.objects.filter(student__campus_id=effective_cid) if effective_cid else FeeInvoice.objects.all()
             agg = inv_qs.aggregate(collected=Sum('paid_amount'), billed=Sum('total_amount'))
             billed = float(agg['billed'] or 0)
             fee_collected_val = float(agg['collected'] or 0)
@@ -252,7 +264,7 @@ class DashboardStatsAPIView(APIView):
             from django.db.models import Avg
             subj_avgs = (
                 TermSubjectResult.objects
-                .filter(term_result__is_published=True)
+                .filter(term_result__is_published=True, **({'term_result__student__campus_id': effective_cid} if effective_cid else {}))
                 .values('subject__name')
                 .annotate(avg_mark=Avg('weighted_mark'))
                 .order_by('-avg_mark')[:10]
@@ -272,7 +284,7 @@ class DashboardStatsAPIView(APIView):
         try:
             six_months_ago = today - timedelta(days=180)
             monthly = (
-                Student.objects
+                student_base_qs
                 .filter(admission_date__gte=six_months_ago)
                 .annotate(month=TruncMonth('admission_date'))
                 .values('month')
@@ -357,6 +369,35 @@ class DashboardStatsAPIView(APIView):
         }
 
         # ── response ────────────────────────────────────────────
+        campus_breakdown = []
+        if effective_cid is None:
+            try:
+                from workforce.models import Campus
+                from fees.models import FeeInvoice
+                from workforce.core_models import Employee
+                for camp in Campus.objects.filter(is_active=True):
+                    c_students = Student.objects.filter(campus=camp).count()
+                    c_active = Student.objects.filter(campus=camp, status='active').count()
+                    c_staff = Employee.objects.filter(campus=camp, employment_status='active').count()
+                    c_inv = FeeInvoice.objects.filter(student__campus=camp).exclude(status='VOID').aggregate(
+                        billed=Sum('total_amount'), paid=Sum('paid_amount'), balance=Sum('balance')
+                    )
+                    b_val = float(c_inv['billed'] or 0)
+                    p_val = float(c_inv['paid'] or 0)
+                    campus_breakdown.append({
+                        "campus_id": camp.id,
+                        "campus_name": camp.name,
+                        "campus_code": camp.code,
+                        "students": c_students,
+                        "active_students": c_active,
+                        "active_staff": c_staff,
+                        "billed": b_val,
+                        "collected": p_val,
+                        "outstanding": float(c_inv['balance'] or 0),
+                        "collection_rate": round((p_val / b_val) * 100, 1) if b_val > 0 else 0.0,
+                    })
+            except Exception:
+                pass
         user_data = UserSerializer(request.user).data if request.user.is_authenticated else {
             'id': 0, 'username': 'Guest', 'email': '', 'first_name': 'Guest', 'last_name': 'User'
         }
@@ -364,6 +405,11 @@ class DashboardStatsAPIView(APIView):
         return Response({
             'success': True,
             'data': {
+                "campus_scope": {
+                    "campus_id": effective_cid,
+                    "mode": "single" if effective_cid else "all",
+                },
+                "campus_breakdown": campus_breakdown,
                 "stats": stats,
                 "isAuthenticated": request.user.is_authenticated,
                 "user": user_data,
@@ -1212,6 +1258,27 @@ class UserViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'success': False, 'message': 'Employee not found or linking failed'}, status=404)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminUser], url_path='assign-campuses')
+    def assign_campuses(self, request, pk=None):
+        """Assign explicit campuses to a user. Expects { campus_ids: [1, 2], primary_campus_id?: 1 }"""
+        user = self.get_object()
+        campus_ids = request.data.get('campus_ids', [])
+        primary_campus_id = request.data.get('primary_campus_id')
+        from workforce.models import Campus
+        from workforce.core_models import Employee
+        campuses = Campus.objects.filter(id__in=campus_ids)
+        user.assigned_campuses.set(campuses)
+        if primary_campus_id is not None:
+            emp = Employee.objects.filter(user=user).first()
+            if emp:
+                emp.campus_id = primary_campus_id if primary_campus_id else None
+                emp.save(update_fields=['campus'])
+        return Response({
+            'success': True,
+            'message': f'Campus assignments updated for {user.get_full_name or user.username}',
+            'user': UserSerializer(user).data,
+        })
+
 
 class ForgotPasswordAPIView(APIView):
     permission_classes = [AllowAny]
@@ -1458,7 +1525,9 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminUser]
     pagination_class = None  # Return all permissions at once for the matrix
 
-class StudentViewSet(viewsets.ModelViewSet):
+from core.campus_filter import CampusPermissionMixin
+class StudentViewSet(CampusPermissionMixin, viewsets.ModelViewSet):
+    campus_field = 'campus'
     queryset = Student.objects.all().select_related('student', 'intake', 'campus').order_by('-student__date_joined')
     serializer_class = StudentSerializer
     permission_classes = [IsAuthenticated]

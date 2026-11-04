@@ -28,17 +28,296 @@ from .permissions import *
 # ============================================================================
 
 class CampusSerializer(serializers.ModelSerializer):
+    """Campus serializer with operational metrics and admin details"""
+    campus_admin_name = serializers.CharField(source='campus_admin.get_full_name', read_only=True)
+    institution_name = serializers.CharField(source='institution.name', read_only=True)
+    student_count = serializers.SerializerMethodField()
+    staff_count = serializers.SerializerMethodField()
+    department_count = serializers.SerializerMethodField()
+    active_fee_structures_count = serializers.SerializerMethodField()
+    overrides_count = serializers.SerializerMethodField()
+
+    def get_student_count(self, obj):
+        try:
+            from student_management.models import Student
+            return Student.objects.filter(campus=obj).count()
+        except Exception:
+            return 0
+
+    def get_staff_count(self, obj):
+        try:
+            return obj.employees.count()
+        except Exception:
+            return 0
+
+    def get_department_count(self, obj):
+        try:
+            return obj.departments.count()
+        except Exception:
+            return 0
+
+    def get_active_fee_structures_count(self, obj):
+        try:
+            from fees.models import FeeStructure, FeeTemplate
+            return (
+                FeeStructure.objects.filter(campus=obj, status='ACTIVE').count()
+                + FeeTemplate.objects.filter(campus=obj, status='ACTIVE').count()
+            )
+        except Exception:
+            return 0
+
+    def get_overrides_count(self, obj):
+        try:
+            return obj.configuration_overrides.filter(is_active=True).count()
+        except Exception:
+            return 0
+
+    def validate_code(self, value):
+        cleaned = (value or '').strip().upper()
+        if not cleaned:
+            raise serializers.ValidationError("Campus code is required.")
+        qs = Campus.objects.filter(code__iexact=cleaned)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(f"A campus with code '{cleaned}' already exists in this institution.")
+        return cleaned
+
+    class Meta:
+        model = Campus
+        fields = '__all__'
+
+
+class _LegacyCampusViewSet(viewsets.ModelViewSet):
+    pass
+
+
+class CampusViewSet(viewsets.ModelViewSet):
+    """Centralized Multi-Campus Management ViewSet"""
+    queryset = Campus.objects.select_related('institution', 'campus_admin').all()
+    serializer_class = CampusSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        include_inactive = str(self.request.query_params.get('include_inactive', '')).lower() in ('true', '1', 'yes')
+        is_detail_action = self.action in ('retrieve', 'update', 'partial_update', 'destroy', 'activate', 'deactivate', 'summary')
+
+        from core.campus_filter import is_user_institution_admin, get_user_allowed_campus_ids
+        qs = Campus.objects.select_related('institution', 'campus_admin').all()
+
+        if user and getattr(user, 'is_authenticated', False) and not is_user_institution_admin(user):
+            allowed_ids = get_user_allowed_campus_ids(user)
+            if allowed_ids:
+                qs = qs.filter(id__in=allowed_ids)
+                if not include_inactive and not is_detail_action:
+                    qs = qs.filter(is_active=True)
+                return qs
+
+        if not include_inactive and not is_detail_action:
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Protect against historical data loss
+        linked_counts = {}
+        try:
+            from student_management.models import Student, Admission
+            from student_settings.models import Enrollment
+            s_count = Student.objects.filter(campus=instance).count()
+            e_count = Enrollment.objects.filter(campus=instance).count()
+            a_count = Admission.objects.filter(campus=instance).count()
+            if s_count:
+                linked_counts['students'] = s_count
+            if e_count:
+                linked_counts['enrollments'] = e_count
+            if a_count:
+                linked_counts['admissions'] = a_count
+        except Exception:
+            pass
+
+        try:
+            emp_count = instance.employees.count()
+            dept_count = instance.departments.count()
+            if emp_count:
+                linked_counts['employees'] = emp_count
+            if dept_count:
+                linked_counts['departments'] = dept_count
+        except Exception:
+            pass
+
+        try:
+            from fees.models import FeeInvoice, FeeStructure, FeeTemplate
+            inv_count = FeeInvoice.objects.filter(student__campus=instance).count()
+            fs_count = FeeStructure.objects.filter(campus=instance).count()
+            ft_count = FeeTemplate.objects.filter(campus=instance).count()
+            if inv_count:
+                linked_counts['invoices'] = inv_count
+            if fs_count:
+                linked_counts['fee_structures'] = fs_count
+            if ft_count:
+                linked_counts['fee_templates'] = ft_count
+        except Exception:
+            pass
+
+        if linked_counts:
+            details = ", ".join(f"{v} {k}" for k, v in linked_counts.items())
+            return Response(
+                {
+                    "detail": (
+                        f"Cannot delete campus '{instance.name}' because it has historical or active records "
+                        f"({details}). Deactivate the campus instead to preserve institutional history."
+                    ),
+                    "linked_records": linked_counts,
+                    "can_delete": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if getattr(instance, 'is_main', False):
+            return Response(
+                {"detail": "Cannot delete the Main Campus. Reassign Main Campus status first or deactivate."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def activate(self, request, pk=None):
+        campus = self.get_object()
+        campus.is_active = True
+        campus.operational_status = 'active'
+        campus.save(update_fields=['is_active', 'operational_status', 'updated_at'])
+        return Response(self.get_serializer(campus).data)
+
+    @action(detail=True, methods=['post'])
+    def deactivate(self, request, pk=None):
+        campus = self.get_object()
+        campus.is_active = False
+        campus.operational_status = request.data.get('operational_status', 'inactive')
+        if campus.operational_status == 'active':
+            campus.operational_status = 'inactive'
+        campus.save(update_fields=['is_active', 'operational_status', 'updated_at'])
+        return Response(self.get_serializer(campus).data)
+
+    @action(detail=True, methods=['get'])
+    def summary(self, request, pk=None):
+        """Returns comprehensive operational & financial summary for a specific campus."""
+        campus = self.get_object()
+        from django.db.models import Sum
+        from decimal import Decimal
+
+        student_stats = {'total': 0, 'active': 0, 'male': 0, 'female': 0}
+        try:
+            from student_management.models import Student
+            s_qs = Student.objects.filter(campus=campus)
+            student_stats['total'] = s_qs.count()
+            student_stats['active'] = s_qs.filter(status='active').count()
+            student_stats['male'] = s_qs.filter(student__gender__in=['M', 'Male', 'male']).count()
+            student_stats['female'] = s_qs.filter(student__gender__in=['F', 'Female', 'female']).count()
+        except Exception:
+            pass
+
+        finance_stats = {
+            'total_invoiced': 0.0,
+            'total_collected': 0.0,
+            'total_outstanding': 0.0,
+            'collection_rate': 0.0,
+            'active_fee_structures': 0,
+            'active_fee_templates': 0,
+        }
+        try:
+            from fees.models import FeeInvoice, FeeStructure, FeeTemplate
+            inv_qs = FeeInvoice.objects.filter(student__campus=campus).exclude(status='VOID')
+            agg = inv_qs.aggregate(
+                invoiced=Sum('total_amount'),
+                paid=Sum('paid_amount'),
+                balance=Sum('balance'),
+            )
+            invoiced = float(agg['invoiced'] or Decimal('0.00'))
+            paid = float(agg['paid'] or Decimal('0.00'))
+            balance = float(agg['balance'] or Decimal('0.00'))
+            finance_stats['total_invoiced'] = invoiced
+            finance_stats['total_collected'] = paid
+            finance_stats['total_outstanding'] = balance
+            finance_stats['collection_rate'] = round((paid / invoiced) * 100, 1) if invoiced > 0 else 0.0
+            finance_stats['active_fee_structures'] = FeeStructure.objects.filter(campus=campus, status='ACTIVE').count()
+            finance_stats['active_fee_templates'] = FeeTemplate.objects.filter(campus=campus, status='ACTIVE').count()
+        except Exception:
+            pass
+
+        hr_stats = {
+            'total_staff': 0,
+            'active_staff': 0,
+            'departments': 0,
+            'faculties': 0,
+        }
+        try:
+            from .models import Department, Faculty, Employee
+            if hasattr(campus, 'employees'):
+                hr_stats['total_staff'] = campus.employees.count()
+                hr_stats['active_staff'] = campus.employees.filter(employment_status='active').count()
+            else:
+                hr_stats['total_staff'] = Employee.objects.filter(campus=campus).count()
+                hr_stats['active_staff'] = Employee.objects.filter(campus=campus, employment_status='active').count()
+
+            hr_stats['departments'] = Department.objects.filter(campus=campus).count()
+            hr_stats['faculties'] = Faculty.objects.filter(campus=campus).count()
+        except Exception:
+            pass
+
+        config_overrides = []
+        try:
+            for ov in campus.config_overrides.select_related('config', 'updated_by').filter(is_active=True):
+                config_overrides.append({
+                    'key': ov.config.key,
+                    'category': ov.config.group,
+                    'override_value': ov.value,
+                    'institution_default': ov.config.value,
+                    'updated_at': ov.updated_at,
+                })
+        except Exception:
+            pass
+
+        return Response({
+            'campus': self.get_serializer(campus).data,
+            'students': student_stats,
+            'finance': finance_stats,
+            'workforce': hr_stats,
+            'configuration_overrides': config_overrides,
+        })
+
+    def _legacy_campus_marker(self):
+        return None
+
+
+class _LegacyCampusPlaceholder:
     """Campus serializer"""
     class Meta:
         model = Campus
         fields = '__all__'
 
 
-class CampusViewSet(viewsets.ModelViewSet):
-    """Campus ViewSet"""
+class _LegacyCampusViewSet(viewsets.ModelViewSet):
+    """Legacy Campus ViewSet body (superseded by enhanced CampusViewSet above)"""
+    pass
+
+
+class _LegacyCampusBody:
     queryset = Campus.objects.all()
     serializer_class = CampusSerializer
     permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        user = getattr(self.request, 'user', None)
+        from core.campus_filter import is_user_multi_campus_admin, get_user_assigned_campus_id
+        if user and getattr(user, 'is_authenticated', False) and not is_user_multi_campus_admin(user):
+            assigned_id = get_user_assigned_campus_id(user)
+            if assigned_id:
+                return Campus.objects.filter(id=assigned_id, is_active=True)
+        return Campus.objects.filter(is_active=True)
+
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
@@ -49,7 +328,8 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         'department', 'job_grade'
     ).prefetch_related('addresses', 'emergency_contacts')
     permission_classes = [AllowAny]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    from core.campus_filter import CampusFilterBackend
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter, CampusFilterBackend]
     filterset_fields = [
         'employment_status', 'employee_category', 
         'department', 'gender', 'job_assignments__job_title'
@@ -128,26 +408,32 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         """Get employee statistics"""
-        total = Employee.objects.count()
-        active = Employee.objects.filter(employment_status='active').count()
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        emp_qs = Employee.objects.filter(campus_id=effective_cid) if effective_cid else Employee.objects.all()
+        total = emp_qs.count()
+        active = emp_qs.filter(employment_status='active').count()
+        total = emp_qs.count()
+        active = emp_qs.filter(employment_status='active').count()
         
         # Calculate specific category counts
-        teaching_staff = Employee.objects.filter(employee_category='teaching').count()
-        non_teaching_staff = Employee.objects.filter(employee_category='non_teaching').count()
+        teaching_staff = emp_qs.filter(employee_category='teaching').count()
+        non_teaching_staff = emp_qs.filter(employee_category='non_teaching').count()
         
         # Calculate employees currently on leave
         today = timezone.now().date()
-        on_leave = LeaveApplication.objects.filter(
+        leave_base = LeaveApplication.objects.filter(employee__campus_id=effective_cid) if effective_cid else LeaveApplication.objects.all()
+        on_leave = leave_base.filter(
             status='approved',
             start_date__lte=today,
             end_date__gte=today
         ).count()
         
-        by_category = Employee.objects.values(
+        by_category = emp_qs.values(
             'employee_category'
         ).annotate(count=Count('id'))
         
-        by_department = Employee.objects.values(
+        by_department = emp_qs.values(
             'department__name'
         ).annotate(count=Count('id')).order_by('-count')[:10]
         
@@ -2669,6 +2955,26 @@ class BulkImportSessionViewSet(viewsets.ModelViewSet):
             'fields': template['fields'],
             'sample_data': template['sample_data']
         })
+
+
+class EmployeeContractViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing Employee Contracts.
+    """
+    queryset = EmployeeContract.objects.select_related('employee').all()
+    serializer_class = EmployeeContractSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['employee', 'contract_type', 'status']
+    search_fields = ['employee__employee_no', 'employee__first_name', 'employee__last_name']
+    ordering_fields = ['start_date', 'end_date', 'gross_salary', 'created_at']
+    ordering = ['-start_date']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
 
 
 class EmployeeDocumentViewSet(viewsets.ModelViewSet):

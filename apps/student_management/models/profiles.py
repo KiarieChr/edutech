@@ -55,7 +55,7 @@ class Student(models.Model):
     student = models.OneToOneField(User, on_delete=models.CASCADE)
     
     # Identity & Demographics
-    admission_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    admission_number = models.CharField(max_length=50, null=True, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
     nationality = models.CharField(max_length=100, null=True, blank=True, default='Kenyan')
     religion = models.CharField(max_length=50, null=True, blank=True)
@@ -117,6 +117,18 @@ class Student(models.Model):
 
     class Meta:
         ordering = ("-student__date_joined",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['campus', 'admission_number'],
+                condition=models.Q(campus__isnull=False, admission_number__isnull=False),
+                name='unique_student_admission_number_per_campus'
+            ),
+            models.UniqueConstraint(
+                fields=['admission_number'],
+                condition=models.Q(campus__isnull=True, admission_number__isnull=False),
+                name='unique_student_admission_number_null_campus'
+            ),
+        ]
 
     def __str__(self):
         return f"{self.student.get_full_name} ({self.admission_number})"

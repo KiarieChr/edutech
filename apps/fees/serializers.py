@@ -25,6 +25,8 @@ class FeeStructureSerializer(serializers.ModelSerializer):
     academic_year_details = AcademicYearSerializer(source='academic_year', read_only=True)
     term_details = TermSerializer(source='term', read_only=True)
     grade_details = GradeStructureSerializer(source='grade', read_only=True)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
+    source_template_name = serializers.CharField(source='source_template.name', read_only=True, default=None)
     
     # Fix: UniqueTogetherValidator requires curriculum since it's in unique_together.
     # Provide a default to prevent "The field curriculum is required" error.
@@ -45,6 +47,10 @@ class FeeStructureSerializer(serializers.ModelSerializer):
             'term', 'term_details',
             'grade', 'grade_details',
             'curriculum', 
+            'curriculum', 
+            'campus', 'campus_name',
+            'source_template', 'source_template_name',
+            'effective_from', 'effective_to',
             'currency', 'status',
             'created_at', 'updated_at',
             'items', 'total_amount',
@@ -111,6 +117,8 @@ class FeeInvoiceSerializer(serializers.ModelSerializer):
     term_name = serializers.CharField(source='term.name', read_only=True)
     year_name = serializers.CharField(source='academic_year.name', read_only=True)
     class_name = serializers.CharField(source='class_session.name', read_only=True)
+    campus_id = serializers.IntegerField(source='student.campus_id', read_only=True, default=None)
+    campus_name = serializers.CharField(source='student.campus.name', read_only=True, default=None)
     items = FeeInvoiceItemSerializer(many=True, read_only=True)
 
     class Meta:
@@ -120,6 +128,7 @@ class FeeInvoiceSerializer(serializers.ModelSerializer):
             'term', 'term_name',
             'academic_year', 'year_name',
             'class_session', 'class_name',
+            'campus_id', 'campus_name',
             'date_issued', 'due_date', 'status', 
             'total_amount', 'paid_amount', 'balance',
             'items'
@@ -209,6 +218,7 @@ class FeeTemplateSerializer(serializers.ModelSerializer):
     term_name = serializers.CharField(source='term.name', read_only=True)
     year_name = serializers.CharField(source='academic_year.name', read_only=True)
     grade_band_name = serializers.CharField(source='grade_band.name', read_only=True, default=None)
+    campus_name = serializers.CharField(source='campus.name', read_only=True, default=None)
     covered_grades = serializers.SerializerMethodField()
     student_count = serializers.SerializerMethodField()
     total_amount = serializers.ReadOnlyField()
@@ -221,6 +231,8 @@ class FeeTemplateSerializer(serializers.ModelSerializer):
             'grade_band', 'grade_band_name', 'grades', 'covered_grades',
             'curriculum', 'term', 'term_name', 'academic_year', 'year_name',
             'status', 'currency',
+            'status', 'currency',
+            'campus', 'campus_name', 'is_shared_template',
             'parent_template',
             'line_items', 'total_amount', 'mandatory_total',
             'student_count',
@@ -271,7 +283,7 @@ class FeeTemplateWriteSerializer(serializers.ModelSerializer):
         model = FeeTemplate
         fields = [
             'id', 'name', 'grade_band', 'grades', 'curriculum',
-            'term', 'academic_year', 'status', 'currency', 'parent_template',
+            'term', 'academic_year', 'status', 'currency', 'campus', 'is_shared_template', 'parent_template',
             'line_items',
         ]
 

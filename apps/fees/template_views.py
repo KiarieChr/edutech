@@ -86,7 +86,7 @@ class GradeBandViewSet(viewsets.ModelViewSet):
 
 class FeeTemplateViewSet(viewsets.ModelViewSet):
     queryset = FeeTemplate.objects.select_related(
-        'grade_band', 'term', 'academic_year', 'curriculum', 'parent_template'
+        'grade_band', 'term', 'academic_year', 'curriculum', 'campus', 'parent_template'
     ).prefetch_related(
         'line_items__vote_head',
         'line_items__override_account',
@@ -94,7 +94,65 @@ class FeeTemplateViewSet(viewsets.ModelViewSet):
         'grades',
     ).all()
     permission_classes = [IsAuthenticated]
-    filterset_fields = ['status', 'term', 'academic_year', 'curriculum', 'grade_band']
+    filterset_fields = ['status', 'term', 'academic_year', 'curriculum', 'grade_band', 'campus', 'is_shared_template']
+    search_fields = ['name']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(self.request)
+        if effective_cid is not None:
+            scope = self.request.query_params.get('scope', '')
+            if scope == 'campus_only':
+                qs = qs.filter(campus_id=effective_cid)
+            elif scope == 'shared_only':
+                qs = qs.filter(campus__isnull=True)
+            else:
+                qs = qs.filter(Q(campus_id=effective_cid) | Q(campus__isnull=True))
+        return qs
+
+    def perform_create(self, serializer):
+        from core.campus_filter import get_effective_campus_id, is_user_institution_admin
+        effective_cid = get_effective_campus_id(self.request)
+        validated = serializer.validated_data
+        if not is_user_institution_admin(self.request.user) and effective_cid is not None:
+            serializer.save(campus_id=effective_cid, is_shared_template=False)
+            return
+        if effective_cid is not None and 'campus' not in validated and not validated.get('is_shared_template', False):
+            serializer.save(campus_id=effective_cid, is_shared_template=False)
+            return
+        super().perform_create(serializer)
+
+    @action(detail=True, methods=['post'], url_path='adopt-for-campus')
+    def adopt_for_campus(self, request, pk=None):
+        """
+        Adopt an institution-wide shared template for a specific campus, creating an independent
+        campus-scoped FeeTemplate that can be customized without altering the shared template.
+        """
+        source = self.get_object()
+        from core.campus_filter import get_effective_campus_id, is_user_institution_admin, get_user_allowed_campus_ids
+        from workforce.models import Campus
+        target_cid = request.data.get('campus_id') or get_effective_campus_id(request)
+        if not target_cid:
+            return Response({'detail': 'campus_id is required to adopt a template for a campus.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target_cid = int(target_cid)
+            campus_obj = Campus.objects.get(pk=target_cid)
+        except (ValueError, TypeError, Campus.DoesNotExist):
+            return Response({'detail': 'Invalid campus_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not is_user_institution_admin(request.user) and target_cid not in get_user_allowed_campus_ids(request.user):
+            return Response({'detail': 'You do not have permission to adopt templates for this campus.'}, status=status.HTTP_403_FORBIDDEN)
+
+        pct = request.data.get('percentage_increase', 0)
+        adopted = source.clone_to(
+            source.academic_year,
+            source.term,
+            percentage_increase=pct,
+            user=request.user,
+            target_campus=campus_obj,
+        )
+        return Response(FeeTemplateSerializer(adopted).data, status=status.HTTP_201_CREATED)
     search_fields = ['name']
 
     def get_serializer_class(self):
@@ -302,9 +360,12 @@ class FeeTemplateViewSet(viewsets.ModelViewSet):
         updated = []
         skipped = []
 
+        from core.campus_filter import get_effective_campus_id
+        target_campus_id = request.data.get('campus_id') or template.campus_id or get_effective_campus_id(request)
         for grade in grades:
             existing = FeeStructure.objects.filter(
                 grade=grade, term=term, academic_year=year,
+                campus_id=target_campus_id,
                 curriculum=template.curriculum,
             ).first()
 
@@ -325,6 +386,8 @@ class FeeTemplateViewSet(viewsets.ModelViewSet):
                     term=term,
                     academic_year=year,
                     curriculum=template.curriculum,
+                    campus_id=target_campus_id,
+                    source_template=template,
                     currency=template.currency,
                     status=template.status,
                 )

@@ -364,6 +364,11 @@ class PurchaseOrder(models.Model):
     supplier = models.ForeignKey(
         'payables.Supplier', on_delete=models.PROTECT, related_name='purchase_orders'
     )
+    campus = models.ForeignKey(
+        'workforce.Campus', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='purchase_orders',
+        help_text="Campus this purchase order is raised for"
+    )
 
     # Traceability
     requisition = models.ForeignKey(

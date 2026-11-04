@@ -37,8 +37,16 @@ class StudentImportViewSet(viewsets.ViewSet):
              return Response({'error': 'Invalid file format. Please upload .xlsx file.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # 1. Parse and Validate
-            result = ExcelImportUtils.parse_and_validate(file_obj)
+            from core.campus_filter import get_effective_campus_id
+            from workforce.models import Campus
+
+            effective_cid = get_effective_campus_id(request)
+            target_campus = None
+            if effective_cid:
+                target_campus = Campus.objects.filter(id=effective_cid).first()
+
+            # 1. Parse and Validate with target_campus fallback
+            result = ExcelImportUtils.parse_and_validate(file_obj, target_campus=target_campus)
             
             # If critical structure errors
             if result.get('critical_error'):
@@ -54,13 +62,16 @@ class StudentImportViewSet(viewsets.ViewSet):
                     'total_rows': result['total_rows'],
                     'preview': result['preview'],
                     'valid_rows': [], # Placeholder to satisfy frontend .length check
-                    'errors': []
+                    'errors': [],
+                    'target_campus': target_campus.name if target_campus else None
                 }
                 safe_result['valid_rows'] = [{} for _ in result['valid_rows']]
 
                 # Sanitize errors data
                 for error in result['errors']:
-                    safe_data = {k: str(v) for k, v in error['data'].items() if not k in ['curriculum', 'level', 'grade', 'stream', 'intake', 'year', 'term', 'dob_obj', 'adm_date_obj']}
+                    safe_data = {k: str(v) for k, v in error['data'].items() if not k in ['curriculum', 'level', 'grade', 'stream', 'intake', 'year', 'term', 'dob_obj', 'adm_date_obj', 'campus']}
+                    if error['data'].get('campus'):
+                        safe_data['campus'] = getattr(error['data']['campus'], 'name', str(error['data']['campus']))
                     safe_result['errors'].append({
                         'row': error['row'],
                         'errors': error['errors'],
@@ -70,14 +81,15 @@ class StudentImportViewSet(viewsets.ViewSet):
                 # Cache validated rows for chunked processing
                 if result['success'] and result['valid_rows']:
                     import_id = str(uuid.uuid4())
-                    serialized = ExcelImportUtils._serialize_valid_rows(result['valid_rows'])
+                    serialized = ExcelImportUtils._serialize_valid_rows(result['valid_rows'], target_campus_id=effective_cid)
                     cache.set(f'import_{import_id}', serialized, timeout=1800)
+                    cache.set(f'import_campus_{import_id}', effective_cid, timeout=1800)
                     safe_result['import_id'] = import_id
 
                 return Response(safe_result)
             
             # 2. Process Import (only if valid and not dry run)
-            created_count = ExcelImportUtils.process_import(result['valid_rows'], user=request.user)
+            created_count = ExcelImportUtils.process_import(result['valid_rows'], user=request.user, target_campus=target_campus)
             
             return Response({
                 'success': True,
@@ -124,13 +136,17 @@ class StudentImportViewSet(viewsets.ViewSet):
             })
 
         try:
-            created = ExcelImportUtils.process_chunk(chunk, importing_user=request.user)
+            from core.campus_filter import get_effective_campus_id
+            target_cid = cache.get(f'import_campus_{import_id}') or get_effective_campus_id(request)
+
+            created = ExcelImportUtils.process_chunk(chunk, importing_user=request.user, target_campus_id=target_cid)
             processed = min(offset + chunk_size, total)
             complete = processed >= total
 
             # Clear cache when done
             if complete:
                 cache.delete(cache_key)
+                cache.delete(f'import_campus_{import_id}')
 
             return Response({
                 'processed': processed,

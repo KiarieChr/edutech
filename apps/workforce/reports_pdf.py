@@ -18,6 +18,16 @@ from io import BytesIO
 from decimal import Decimal
 
 
+def get_tenant_currency():
+    """Retrieve tenant configured currency or fallback to KES"""
+    try:
+        from core.models import InstitutionProfile
+        inst = InstitutionProfile.get_instance()
+        return getattr(inst, 'currency', 'KES') or 'KES'
+    except Exception:
+        return 'KES'
+
+
 class PDFReportGenerator:
     """Base class for PDF report generation"""
     
@@ -164,6 +174,7 @@ class PayslipPDFGenerator(PDFReportGenerator):
         
         # Earnings Section
         elements.append(Paragraph('EARNINGS', self.styles['CustomHeading']))
+        currency = getattr(payroll_calculation.payroll_period, 'currency', None) or get_tenant_currency()
         
         details = payroll_calculation.details.filter(item_type='earning')
         earnings_data = [['Description', 'Amount']]
@@ -171,10 +182,10 @@ class PayslipPDFGenerator(PDFReportGenerator):
         for detail in details:
             earnings_data.append([
                 detail.description,
-                f"{payroll_calculation.payroll_period.currency if hasattr(payroll_calculation.payroll_period, 'currency') else '$'} {detail.amount:,.2f}"
+                f"{currency} {detail.amount:,.2f}"
             ])
         
-        earnings_data.append(['GROSS PAY', f"$ {payroll_calculation.gross_pay:,.2f}"])
+        earnings_data.append(['GROSS PAY', f"{currency} {payroll_calculation.gross_pay:,.2f}"])
         
         earnings_table = self._create_table(
             earnings_data,
@@ -192,12 +203,12 @@ class PayslipPDFGenerator(PDFReportGenerator):
         for detail in deduction_details:
             deductions_data.append([
                 detail.description,
-                f"$ {detail.amount:,.2f}"
+                f"{currency} {detail.amount:,.2f}"
             ])
         
         deductions_data.append([
             'TOTAL DEDUCTIONS',
-            f"$ {payroll_calculation.total_deductions:,.2f}"
+            f"{currency} {payroll_calculation.total_deductions:,.2f}"
         ])
         
         deductions_table = self._create_table(
@@ -210,7 +221,7 @@ class PayslipPDFGenerator(PDFReportGenerator):
         # Net Pay (Highlighted)
         net_pay_data = [[
             'NET PAY',
-            f"$ {payroll_calculation.net_pay:,.2f}"
+            f"{currency} {payroll_calculation.net_pay:,.2f}"
         ]]
         
         net_pay_table = Table(net_pay_data, colWidths=[4.5*inch, 2*inch])
@@ -348,13 +359,14 @@ class PayrollRegisterPDFGenerator(PDFReportGenerator):
         total_deductions = Decimal('0')
         total_net = Decimal('0')
         
+        currency = get_tenant_currency()
         for calc in calculations:
             data.append([
                 calc.employee.employee_no,
                 calc.employee.get_full_name()[:20],
-                f"${calc.gross_pay:,.2f}",
-                f"${calc.total_deductions:,.2f}",
-                f"${calc.net_pay:,.2f}"
+                f"{currency} {calc.gross_pay:,.2f}",
+                f"{currency} {calc.total_deductions:,.2f}",
+                f"{currency} {calc.net_pay:,.2f}"
             ])
             
             total_gross += calc.gross_pay
@@ -365,9 +377,9 @@ class PayrollRegisterPDFGenerator(PDFReportGenerator):
         data.append([
             'TOTAL',
             f"{calculations.count()} employees",
-            f"${total_gross:,.2f}",
-            f"${total_deductions:,.2f}",
-            f"${total_net:,.2f}"
+            f"{currency} {total_gross:,.2f}",
+            f"{currency} {total_deductions:,.2f}",
+            f"{currency} {total_net:,.2f}"
         ])
         
         table = self._create_table(
@@ -387,11 +399,11 @@ class PayrollRegisterPDFGenerator(PDFReportGenerator):
         elements.append(Paragraph('PAYMENT SUMMARY', self.styles['CustomHeading']))
         
         summary_data = [
-            ['Total Gross Pay', f"${total_gross:,.2f}"],
-            ['Total Deductions', f"${total_deductions:,.2f}"],
-            ['Total Net Pay', f"${total_net:,.2f}"],
+            ['Total Gross Pay', f"{currency} {total_gross:,.2f}"],
+            ['Total Deductions', f"{currency} {total_deductions:,.2f}"],
+            ['Total Net Pay', f"{currency} {total_net:,.2f}"],
             ['Number of Employees', str(calculations.count())],
-            ['Average Net Pay', f"${(total_net / calculations.count() if calculations.count() > 0 else 0):,.2f}"]
+            ['Average Net Pay', f"{currency} {(total_net / calculations.count() if calculations.count() > 0 else 0):,.2f}"]
         ]
         
         summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])

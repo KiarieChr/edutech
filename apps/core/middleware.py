@@ -1,4 +1,5 @@
 from django.http import Http404
+from django.db import connection
 # pyrefly: ignore [missing-import]
 from django_tenants.middleware.main import TenantMainMiddleware
 # pyrefly: ignore [missing-import]
@@ -7,11 +8,33 @@ from tenants.models import Client
 
 class CustomTenantMiddleware(TenantMainMiddleware):
     """
-    Custom Tenant Middleware for robust subdomain routing.
+    Custom Tenant Middleware for robust subdomain and header-based tenant routing.
     If a requested subdomain (tenant) is not found, instead of throwing a 404,
     it falls back to the public schema so the user can be routed to the landing page
     or shown a friendly "Tenant not found" page.
+    Also supports X-Tenant-Schema header for cross-origin or local dev API routing.
     """
+
+    def process_request(self, request):
+        header_schema = (
+            request.META.get('HTTP_X_TENANT_SCHEMA') or
+            request.META.get('HTTP_X_TENANT') or
+            request.GET.get('tenant') or
+            request.GET.get('schema')
+        )
+        if header_schema:
+            try:
+                connection.set_schema_to_public()
+                tenant = Client.objects.get(schema_name=header_schema)
+                tenant.domain_url = self.hostname_from_request(request)
+                request.tenant = tenant
+                connection.set_tenant(request.tenant)
+                self.setup_url_routing(request)
+                return None
+            except Exception:
+                pass
+
+        return super().process_request(request)
     
     def get_tenant(self, domain_model, hostname):
         """

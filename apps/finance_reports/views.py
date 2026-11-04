@@ -77,12 +77,16 @@ class ReportViewSet(viewsets.ViewSet):
                 cash_bank_balance += last_ledger.balance_after
         
         # Get outstanding fees (invoiced but not paid)
-        total_invoiced = FeeInvoice.objects.filter(
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        inv_base_qs = FeeInvoice.objects.filter(student__campus_id=effective_cid) if effective_cid else FeeInvoice.objects.all()
+        rec_base_qs = Receipt.objects.filter(student__campus_id=effective_cid) if effective_cid else Receipt.objects.all()
+        total_invoiced = inv_base_qs.filter(
             date_issued__gte=start_date,
             date_issued__lte=end_date
         ).aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
         
-        total_paid = Receipt.objects.filter(
+        total_paid = rec_base_qs.filter(
             received_date__gte=start_date,
             received_date__lte=end_date,
             status__in=['POSTED', 'ISSUED']
@@ -208,7 +212,12 @@ class ReportViewSet(viewsets.ViewSet):
         session_id = request.query_params.get('session')
         group_by = request.query_params.get('group_by', 'term')
 
-        inv_filters = Q()
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
+        inv_filters = Q(student__campus_id=effective_cid) if effective_cid else Q()
+        rec_filters = Q(receipt_type='STUDENT_FEE', status__in=['ISSUED', 'PRINTED'])
+        if effective_cid:
+            rec_filters &= Q(student__campus_id=effective_cid)
         rec_filters = Q(receipt_type='STUDENT_FEE', status__in=['ISSUED', 'PRINTED'])
         if start_date:
             inv_filters &= Q(date_issued__gte=start_date)
@@ -301,7 +310,11 @@ class ReportViewSet(viewsets.ViewSet):
         page_size = int(request.query_params.get('page_size', 50))
         sort_by = request.query_params.get('sort_by', '-balance')  # -balance, name, admission_number
 
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
         filters = Q(balance__gte=min_balance) & ~Q(status='VOID')
+        if effective_cid:
+            filters &= Q(student__campus_id=effective_cid)
         if academic_year_id:
             filters &= Q(academic_year_id=academic_year_id)
         if term_id:
@@ -402,7 +415,11 @@ class ReportViewSet(viewsets.ViewSet):
         group_by = request.query_params.get('group_by', 'month')
         payment_method_id = request.query_params.get('payment_method')
 
+        from core.campus_filter import get_effective_campus_id
+        effective_cid = get_effective_campus_id(request)
         filters = Q(status__in=['ISSUED', 'PRINTED'])
+        if effective_cid:
+            filters &= Q(student__campus_id=effective_cid)
         if start_date:
             filters &= Q(received_date__gte=start_date)
         if end_date:

@@ -140,6 +140,15 @@ class Employee(AuditedModel):
     contract_end_date = models.DateField(null=True, blank=True)
     contract_renewal_count = models.PositiveIntegerField(default=0)
     
+    # Statutory & Bank Details (HRMS Milestone 1)
+    kra_pin = models.CharField(max_length=20, blank=True, verbose_name=_("KRA PIN"))
+    nssf_number = models.CharField(max_length=20, blank=True, verbose_name=_("NSSF Number"))
+    nhif_number = models.CharField(max_length=20, blank=True, verbose_name=_("NHIF / SHIF Number"))
+    bank_name = models.CharField(max_length=100, blank=True, verbose_name=_("Bank Name"))
+    bank_branch = models.CharField(max_length=100, blank=True, verbose_name=_("Bank Branch"))
+    bank_account_name = models.CharField(max_length=150, blank=True, verbose_name=_("Bank Account Name"))
+    bank_account_number = models.CharField(max_length=50, blank=True, verbose_name=_("Bank Account Number"))
+    
     # Additional personal info
     blood_group = models.CharField(
         max_length=10, 
@@ -214,6 +223,70 @@ class Employee(AuditedModel):
         blank=True,
         related_name='employee_profile'
     )
+
+
+class EmployeeContract(AuditedModel):
+    """
+    Employee contract model for managing contracts, remuneration, and attachments.
+    """
+    class ContractType(models.TextChoices):
+        PERMANENT = 'permanent', _('Permanent')
+        FIXED_TERM = 'fixed_term', _('Fixed Term')
+        CASUAL = 'casual', _('Casual')
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', _('Active')
+        EXPIRED = 'expired', _('Expired')
+        TERMINATED = 'terminated', _('Terminated')
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='contracts',
+        verbose_name=_('Employee')
+    )
+    contract_type = models.CharField(
+        max_length=20,
+        choices=ContractType.choices,
+        default=ContractType.PERMANENT,
+        verbose_name=_('Contract Type')
+    )
+    start_date = models.DateField(verbose_name=_('Start Date'))
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name=_('End Date'),
+        help_text=_('Nullable for permanent contracts')
+    )
+    gross_salary = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name=_('Gross Salary')
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        verbose_name=_('Status')
+    )
+    file_attachment = models.FileField(
+        upload_to='contracts/',
+        null=True,
+        blank=True,
+        verbose_name=_('Signed Contract File')
+    )
+
+    class Meta:
+        db_table = 'hr_employee_contract'
+        ordering = ['-start_date']
+        indexes = [
+            models.Index(fields=['employee', 'status']),
+            models.Index(fields=['contract_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee.employee_no} - {self.get_contract_type_display()} ({self.get_status_display()})"
+
 
 
 # ============================================================================

@@ -3,14 +3,24 @@ import zipfile
 
 from django.core.mail import EmailMessage
 from django.conf import settings
+from django.http import HttpResponse
+from django.core.exceptions import ValidationError
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from student_management.models.admission import Admission
 from student_management.serializers import AdmissionSerializer
+# pyrefly: ignore[missing-import]
+from documents.models import DocumentTemplate
+# pyrefly: ignore[missing-import]
+from documents.services import DocumentGeneratorService, TemplateResolutionError, DocumentTemplateResolver
+from student_management.documents import AdmissionLetterDataProvider
 
 
-class AdmissionViewSet(viewsets.ModelViewSet):
+from core.campus_filter import CampusPermissionMixin, CampusFilterBackend
+
+
+class AdmissionViewSet(CampusPermissionMixin, viewsets.ModelViewSet):
     queryset = Admission.objects.select_related(
         'student', 'student__student', 'application',
         'application__applying_for_grade', 'application__applying_for_curriculum',
@@ -19,7 +29,7 @@ class AdmissionViewSet(viewsets.ModelViewSet):
     serializer_class = AdmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
     from django_filters.rest_framework import DjangoFilterBackend
-    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend, CampusFilterBackend]
     search_fields = ['admission_number', 'student__student__first_name', 'student__student__last_name']
     # remove the entry type and status
     filterset_fields = ['campus', 'student__student__gender']
@@ -42,18 +52,92 @@ class AdmissionViewSet(viewsets.ModelViewSet):
         serializer.save(updated_by=self.request.user)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Email: send a single document PDF (generated on the frontend)
+    # Document Generation & Export Studio Integration (Phase 3)
+    # GET /api/student-management/admissions/{id}/generate_document/
+    # Query params:
+    #   - template_id: optional integer (falls back to category default)
+    #   - preview: 'true' | 'false' (if true returns JSON preview HTML, if false streams PDF)
+    #   - doc_type: 'admission_letter'
+    # ─────────────────────────────────────────────────────────────────────────
+    @action(detail=True, methods=['get'], url_path='generate_document')
+    def generate_document(self, request, pk=None):
+        admission = self.get_object()
+        template_id = request.query_params.get('template_id')
+        if template_id:
+            try:
+                template_id = int(template_id)
+            except (ValueError, TypeError):
+                template_id = None
+
+        is_preview = request.query_params.get('preview', 'false').lower() in ('true', '1')
+
+        try:
+            provider = AdmissionLetterDataProvider(admission)
+
+            if is_preview:
+                preview_data = DocumentGeneratorService.generate_preview_html(
+                    provider, template_id=template_id
+                )
+                return Response(preview_data, status=status.HTTP_200_OK)
+
+            pdf_bytes = DocumentGeneratorService.generate_pdf(provider, template_id=template_id)
+            clean_adm = (admission.admission_number or f"id{admission.id}").replace('/', '_')
+            filename = f"admission_letter_{clean_adm}.pdf"
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
+            return response
+
+        except TemplateResolutionError as exc:
+            return Response(
+                {
+                    'error': str(exc),
+                    'code': 'TEMPLATE_RESOLUTION_FAILED',
+                    'detail': 'No published document template is available for this category.'
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except ValidationError as exc:
+            return Response(
+                {'error': str(exc), 'code': 'VALIDATION_ERROR'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {'error': f'Failed to generate document: {str(exc)}', 'code': 'GENERATION_ERROR'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=['get'], url_path='available_templates')
+    def available_templates(self, request, pk=None):
+        """
+        Returns published templates available for official letters.
+        """
+        templates = DocumentTemplateResolver.get_available_templates(
+            category=DocumentTemplate.Category.LETTER
+        )
+        return Response([
+            {
+                'id': t.id,
+                'name': t.name,
+                'category': t.category,
+                'is_default': t.is_default,
+                'status': t.status,
+                'updated_at': t.updated_at,
+            }
+            for t in templates
+        ], status=status.HTTP_200_OK)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Email: send a single document PDF
     # POST /api/student-management/admissions/{id}/send_document/
-    # Expects multipart/form-data: pdf_file (binary), doc_type (str), recipient_email (str, optional)
+    # Expects multipart/form-data: pdf_file (binary, optional), doc_type (str), recipient_email (str, optional)
+    # If pdf_file is omitted, server auto-renders using DocumentGeneratorService.
     # ─────────────────────────────────────────────────────────────────────────
     @action(detail=True, methods=['post'], url_path='send_document')
     def send_document(self, request, pk=None):
         admission = self.get_object()
         doc_type = request.data.get('doc_type', 'admission_letter')
         pdf_file = request.FILES.get('pdf_file')
-
-        if not pdf_file:
-            return Response({'error': 'pdf_file is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Resolve recipient
         recipient = (
@@ -70,8 +154,23 @@ class AdmissionViewSet(viewsets.ModelViewSet):
             'registration_confirmation': 'Registration Confirmation',
         }
         doc_label = doc_labels.get(doc_type, 'School Document')
-        student_name = f"{admission.application.first_name} {admission.application.last_name}"
-        filename = f"{admission.admission_number}_{doc_type}.pdf"
+        student_name = f"{admission.application.first_name} {admission.application.last_name}" if admission.application else str(admission.student)
+        clean_adm = (admission.admission_number or f"id{admission.id}").replace('/', '_')
+        filename = f"{clean_adm}_{doc_type}.pdf"
+
+        # Auto-generate server-side PDF if not supplied in multipart
+        pdf_content = None
+        if pdf_file:
+            pdf_content = pdf_file.read()
+        else:
+            try:
+                provider = AdmissionLetterDataProvider(admission)
+                pdf_content = DocumentGeneratorService.generate_pdf(provider)
+            except Exception as e:
+                return Response(
+                    {'error': f'Failed to generate official PDF for email: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         # Fetch institution profile for email sender name
         try:
@@ -97,7 +196,7 @@ class AdmissionViewSet(viewsets.ModelViewSet):
                 from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@school.ac.ke'),
                 to=[recipient],
             )
-            email.attach(filename, pdf_file.read(), 'application/pdf')
+            email.attach(filename, pdf_content, 'application/pdf')
             email.send()
         except Exception as exc:
             return Response(
