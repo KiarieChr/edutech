@@ -365,7 +365,7 @@ class FeeStructureViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(Q(campus_id=effective_cid) | Q(campus__isnull=True))
             else:
                 qs = qs.filter(campus_id=effective_cid)
-        return qs.select_related('academic_year', 'term', 'grade', 'campus', 'source_template').order_by('-academic_year__start_date', '-term__start_date')
+        return qs.select_related('academic_year', 'term', 'grade', 'campus', 'source_template').prefetch_related('items__account').order_by('-academic_year__start_date', '-term__start_date')
 
     def perform_create(self, serializer):
         from core.campus_filter import get_effective_campus_id
@@ -489,17 +489,13 @@ class FeeInvoiceViewSet(viewsets.ModelViewSet):
             'academic_year',
             'term',
             'class_session',
-            'class_session',
             'class_session__grade',
             'student__campus',
-        )
+        ).prefetch_related('items')
         from core.campus_filter import get_effective_campus_id
         effective_cid = get_effective_campus_id(self.request)
         if effective_cid is not None:
             queryset = queryset.filter(student__campus_id=effective_cid)
-        if False:
-            queryset = queryset.select_related(
-        )
         return queryset.order_by('-date_issued', '-created_at')
 
 
@@ -565,13 +561,9 @@ class BillingViewSet(viewsets.ViewSet):
 
         from student_management.models import Student
         from core.campus_filter import get_effective_campus_id
-        effective_cid = get_effective_campus_id(request)
-        student_campus_q = Q(student__campus_id=effective_cid) if effective_cid else Q()
-        from student_management.models import Student
-        from core.campus_filter import get_effective_campus_id
+
         effective_cid = get_effective_campus_id(request)
         student_qs = Student.objects.filter(campus_id=effective_cid) if effective_cid else Student.objects.all()
-        from django.db.models import Q
 
         students = student_qs.filter(
             Q(student__first_name__icontains=query) |

@@ -1,0 +1,5 @@
+admission_number,date,amount,payment_method,reference,receipt_number,payer_name,notes
+SCH/2026/0001,2024-03-01,2300,KCB BANK FEES,TXN-E2E-001,RCT-HIST-001,John Doe,Historical balance clearance
+SCH/2026/0002,2024-03-05,10000,KCB BANK FEES,TXN-E2E-002,RCT-HIST-002,Jane Smith,Historical term 1 fee with prepayment
+INVALID-ADM-999,2024-03-06,5000,KCB BANK FEES,TXN-E2E-003,RCT-HIST-003,Error Student,Expected failure row
+

@@ -6,7 +6,7 @@ from .models import Account, AccountType, AccountSubType
 from .serializers import AccountSerializer, AccountTypeOptionSerializer, AccountSubTypeOptionSerializer
 
 class AccountViewSet(viewsets.ModelViewSet):
-    queryset = Account.objects.all()
+    queryset = Account.objects.select_related('parent').all()
     serializer_class = AccountSerializer
     pagination_class = None  # Always return all accounts (small dataset)
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]

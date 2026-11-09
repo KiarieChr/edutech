@@ -177,6 +177,12 @@ class AdmissionSerializer(serializers.ModelSerializer):
         ret['curriculum_level_id'] = active_enr.curriculum_level_id if active_enr else None
         ret['intake_id'] = student.intake_id
 
+        # Campus details
+        active_campus = instance.campus or student.campus
+        ret['campus_id'] = active_campus.id if active_campus else None
+        ret['campus_name'] = active_campus.name if active_campus else 'Main / All'
+        ret['campus_code'] = getattr(active_campus, 'code', '') or ''
+
         # Parent / Guardian details
         parents = list(student.parents.all())
         primary_parent = parents[0] if parents else None

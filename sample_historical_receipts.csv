@@ -1,0 +1,3 @@
+admission_number,date,amount,payment_method,reference,receipt_number,payer_name,academic_year,term,fee_category,notes
+ADM-2024-001,2024-02-15,25000,Bank Transfer,EQ-98721,RCT-2024-0001,Grace Kamau,2024,Term 1,Tuition Fees,Opening implementation fee balance
+ADM-2024-002,2024-03-10,18000,M-Pesa,QWE892182,,James Mwangi,2024,Term 1,Tuition Fees,Term 1 clearance payment

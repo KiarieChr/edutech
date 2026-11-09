@@ -7,8 +7,9 @@ Provides endpoints for arrears KPIs, charts, and detailed student lists.
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db.models import Sum, Count, Q, F, DecimalField
+from django.db.models import Sum, Count, Q, F, DecimalField, Max
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from decimal import Decimal
 
 from .models import FeeInvoice
@@ -166,12 +167,28 @@ class ArrearsViewSet(viewsets.ViewSet):
         # Apply filters
         invoices = self._apply_filters(invoices, request)
         
-        # Calculate KPIs
+        # Calculate KPIs for outstanding invoices
         kpi_data = invoices.aggregate(
             total_arrears=Coalesce(Sum('balance'), Decimal('0.00'), output_field=DecimalField()),
             student_count=Count('student', distinct=True),
-            highest_arrears=Coalesce(Sum('balance'), Decimal('0.00'), output_field=DecimalField()),  # Max balance per student would be better
+            highest_arrears=Coalesce(Max('balance'), Decimal('0.00'), output_field=DecimalField()),
         )
+        
+        # Calculate overall billed and paid metrics across all invoices
+        all_invoices = FeeInvoice.objects.exclude(status='VOID')
+        all_invoices = self._apply_filters(all_invoices, request)
+        billing_data = all_invoices.aggregate(
+            total_billed=Coalesce(Sum('total_amount'), Decimal('0.00'), output_field=DecimalField()),
+            total_paid=Coalesce(Sum('paid_amount'), Decimal('0.00'), output_field=DecimalField()),
+        )
+        total_billed = float(billing_data['total_billed'])
+        total_paid = float(billing_data['total_paid'])
+        collection_rate = round((total_paid / total_billed * 100), 1) if total_billed > 0 else 0.0
+
+        # Total student body count in database
+        total_students_count = Student.objects.filter(status='active').count()
+        if total_students_count == 0:
+            total_students_count = Student.objects.count()
         
         # Calculate average arrears
         if kpi_data['student_count'] > 0:
@@ -187,8 +204,6 @@ class ArrearsViewSet(viewsets.ViewSet):
         fully_paid_count = self._apply_filters(fully_paid_count, request)
         kpi_data['fully_paid_count'] = fully_paid_count.values('student').distinct().count()
         
-        # TODO: Calculate arrears growth (compare with previous period)
-        # For now, set to 0
         kpi_data['arrears_growth'] = 0
         
         # Arrears by Class
@@ -229,6 +244,10 @@ class ArrearsViewSet(viewsets.ViewSet):
                 'highest_arrears': float(kpi_data['highest_arrears']),
                 'fully_paid_count': kpi_data['fully_paid_count'],
                 'arrears_growth': kpi_data['arrears_growth'],
+                'total_paid': total_paid,
+                'total_billed': total_billed,
+                'total_students': total_students_count,
+                'collection_rate': collection_rate,
             },
             'by_class': by_class,
             'by_intake': by_intake,
@@ -295,27 +314,45 @@ class ArrearsViewSet(viewsets.ViewSet):
             )
         
         # Get unique students with their aggregated data
+        today = timezone.now().date()
         student_data = {}
         for invoice in invoices:
             student_id = invoice.student.id
             
             if student_id not in student_data:
+                parent = invoice.student.parents.first() if invoice.student else None
+                parent_name = f"{parent.first_name} {parent.last_name}".strip() if parent else ''
+                parent_phone = parent.phone if parent else ''
+                
+                grade_name = invoice.class_session.grade.name if (invoice.class_session and invoice.class_session.grade) else 'Unknown'
+                session_name = invoice.class_session.name if invoice.class_session else ''
+                stream_name = session_name if session_name and session_name != grade_name else ''
+
                 student_data[student_id] = {
                     'id': student_id,
-                    'name': invoice.student.student.get_full_name if invoice.student.student else 'Unknown',
-                    'admission_number': invoice.student.admission_number,
-                    'class_name': invoice.class_session.grade.name if invoice.class_session and invoice.class_session.grade else 'Unknown',
+                    'name': str(invoice.student.student.get_full_name) if (invoice.student and invoice.student.student) else 'Unknown',
+                    'admission_number': invoice.student.admission_number if invoice.student else '',
+                    'class_name': grade_name,
+                    'stream': stream_name,
                     'term': invoice.term.name if invoice.term else 'Unknown',
                     'total_payable': 0,
                     'total_paid': 0,
                     'balance': 0,
-                    'status': 'Active'  # TODO: Derive from invoice or student status
+                    'days_overdue': 0,
+                    'parent_name': parent_name,
+                    'parent_phone': parent_phone,
+                    'status': 'Active'
                 }
             
             # Aggregate amounts
             student_data[student_id]['total_payable'] += float(invoice.total_amount)
             student_data[student_id]['total_paid'] += float(invoice.paid_amount)
             student_data[student_id]['balance'] += float(invoice.balance)
+            
+            if invoice.date_issued:
+                days = (today - invoice.date_issued).days
+                if days > student_data[student_id]['days_overdue']:
+                    student_data[student_id]['days_overdue'] = days
         
         # Convert to list
         results = list(student_data.values())

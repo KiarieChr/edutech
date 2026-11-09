@@ -7,6 +7,7 @@ Provides endpoints for receipt management and statistics.
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.http import HttpResponse
 from django.db.models import Sum, Count, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -16,6 +17,7 @@ from datetime import date, timedelta
 from finance.models import Receipt, PaymentMethod, StudentPrepayment, Account, Sponsorship
 from student_management.models import Student
 from fees.models import FeeInvoice
+from fees.receipt_migration_engine import HistoricalReceiptMigrationEngine
 
 
 class ReceiptViewSet(viewsets.ViewSet):
@@ -73,6 +75,12 @@ class ReceiptViewSet(viewsets.ViewSet):
         return queryset
     
     def _serialize_receipt(self, receipt, allocations_map=None, inv_bal_map=None, prep_map=None):
+        if receipt.received_by:
+            full_name = receipt.received_by.get_full_name() if callable(getattr(receipt.received_by, 'get_full_name', None)) else str(receipt.received_by)
+            issued_by = full_name or receipt.received_by.username or 'Unknown'
+        else:
+            issued_by = 'Unknown'
+
         data = {
             'id': receipt.id,
             'receipt_number': receipt.receipt_number,
@@ -83,7 +91,7 @@ class ReceiptViewSet(viewsets.ViewSet):
             'amount_allocated': float(receipt.amount_allocated or 0),
             'payment_method': receipt.payment_method.name if receipt.payment_method else 'Unknown',
             'reference': receipt.reference,
-            'issued_by': receipt.received_by.get_full_name if receipt.received_by else 'Unknown',
+            'issued_by': issued_by,
             'status': receipt.get_status_display(),
             'print_count': receipt.print_count,
             'notes': receipt.notes,
@@ -94,7 +102,12 @@ class ReceiptViewSet(viewsets.ViewSet):
         # Add student info for student receipts
         if receipt.student:
             data['student_id'] = receipt.student.id
-            data['student_name'] = receipt.student.student.get_full_name if receipt.student.student else 'Unknown'
+            stu_user = getattr(receipt.student, 'student', None)
+            if stu_user:
+                full_name = stu_user.get_full_name() if callable(getattr(stu_user, 'get_full_name', None)) else str(stu_user)
+                data['student_name'] = full_name or f"{getattr(receipt.student, 'first_name', '')} {getattr(receipt.student, 'last_name', '')}".strip() or 'Unknown Student'
+            else:
+                data['student_name'] = f"{getattr(receipt.student, 'first_name', '')} {getattr(receipt.student, 'last_name', '')}".strip() or 'Unknown Student'
             data['admission_no'] = receipt.student.admission_number
             # Balance summary for receipt printing
             inv_bal = (inv_bal_map or {}).get(receipt.student_id, 0)
@@ -795,11 +808,26 @@ class ReceiptViewSet(viewsets.ViewSet):
             received_date=today
         ).exclude(status='REVERSED')
         
-        # Get receipts for current term (simplified - get this month's receipts)
-        month_start = today.replace(day=1)
-        term_receipts = Receipt.objects.filter(
-            received_date__gte=month_start
-        ).exclude(status='REVERSED')
+        # Support timeframe or explicit date range query parameters
+        date_from = request.query_params.get('date_from') or request.query_params.get('startDate')
+        date_to = request.query_params.get('date_to') or request.query_params.get('endDate')
+        timeframe = request.query_params.get('timeframe')
+
+        if timeframe == 'today':
+            date_from = today.strftime('%Y-%m-%d')
+            date_to = today.strftime('%Y-%m-%d')
+        elif timeframe == 'week':
+            date_from = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+        elif timeframe == 'month':
+            date_from = (today - timedelta(days=30)).strftime('%Y-%m-%d')
+        elif timeframe == 'year':
+            date_from = f"{today.year}-01-01"
+
+        term_receipts = Receipt.objects.exclude(status='REVERSED')
+        if date_from:
+            term_receipts = term_receipts.filter(received_date__gte=date_from)
+        if date_to:
+            term_receipts = term_receipts.filter(received_date__lte=date_to)
         
         # Calculate totals
         today_stats = today_receipts.aggregate(
@@ -826,24 +854,34 @@ class ReceiptViewSet(viewsets.ViewSet):
         
         # Payment method breakdown
         payment_breakdown = {}
+        term_total_float = float(term_stats['total'])
         for pm in PaymentMethod.objects.all():
             stats = term_receipts.filter(payment_method=pm).aggregate(
                 count=Count('id'),
                 amount=Coalesce(Sum('amount_received'), Decimal('0.00'))
             )
             if stats['count'] > 0:
-                payment_breakdown[pm.name.lower()] = {
+                pm_key = pm.name.lower().replace(' ', '_').replace('-', '_')
+                pm_amount = float(stats['amount'])
+                payment_breakdown[pm_key] = {
+                    'name': pm.name,
                     'count': stats['count'],
-                    'amount': float(stats['amount']),
-                    'percentage': round((float(stats['amount']) / float(term_stats['total']) * 100), 1) if float(term_stats['total']) > 0 else 0
+                    'amount': pm_amount,
+                    'percentage': round((pm_amount / term_total_float * 100), 1) if term_total_float > 0 else 0
                 }
         
-        # Get last receipt number
-        last_receipt = Receipt.objects.order_by('-created_at').first()
-        last_receipt_number = last_receipt.receipt_number if last_receipt else 'RCT-2026-0000'
+        # Get last receipt number safely
+        last_receipt = Receipt.objects.order_by('-id').first()
+        last_receipt_number = last_receipt.receipt_number if (last_receipt and last_receipt.receipt_number) else 'RCT-2026-0000'
         
-        # TODO: Generate next receipt number properly
-        next_receipt_number = 'RCT-2026-' + str(int(last_receipt_number.split('-')[-1]) + 1).zfill(4) if last_receipt else 'RCT-2026-0001'
+        # Generate next receipt number safely
+        import re
+        digits = re.findall(r'\d+', last_receipt_number) if last_receipt_number else []
+        if digits:
+            next_num = int(digits[-1]) + 1
+            next_receipt_number = f"RCT-2026-{str(next_num).zfill(4)}"
+        else:
+            next_receipt_number = 'RCT-2026-0001'
         
         return Response({
             'total_receipts_today': today_stats['count'],
@@ -861,3 +899,95 @@ class ReceiptViewSet(viewsets.ViewSet):
             'today_trend': '+0%',  # TODO: Calculate actual trend
             'term_trend': '+0%'
         })
+
+    @action(detail=False, methods=['post'], url_path='bulk_import')
+    def bulk_import(self, request):
+        """
+        Bulk import historical & implementation receipts from CSV or Excel.
+        Supports pre-flight dry-run validation and immediate GL posting.
+
+        Form data / Query params:
+        - file: File (CSV or Excel)
+        - dry_run: bool ('true' / 'false')
+        - post_to_gl: bool (default 'true')
+        - auto_allocate: bool (default 'true')
+        - academic_year_id: int (optional default)
+        - term_id: int (optional default)
+        - payment_method_id: int (optional default)
+        """
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response(
+                {'error': 'No file was uploaded. Please upload a CSV or Excel (.xlsx) file under the field "file".'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Parse boolean options
+        dry_run_raw = request.data.get('dry_run', request.query_params.get('dry_run', 'false'))
+        is_dry_run = str(dry_run_raw).lower() in ('true', '1')
+
+        post_gl_raw = request.data.get('post_to_gl', request.query_params.get('post_to_gl', 'true'))
+        post_to_gl = str(post_gl_raw).lower() in ('true', '1')
+
+        auto_alloc_raw = request.data.get('auto_allocate', request.query_params.get('auto_allocate', 'true'))
+        auto_allocate = str(auto_alloc_raw).lower() in ('true', '1')
+
+        # Optional default IDs
+        def _parse_id(val):
+            try:
+                return int(val) if val else None
+            except (ValueError, TypeError):
+                return None
+
+        academic_year_id = _parse_id(request.data.get('academic_year_id') or request.query_params.get('academic_year_id'))
+        term_id = _parse_id(request.data.get('term_id') or request.query_params.get('term_id'))
+        payment_method_id = _parse_id(request.data.get('payment_method_id') or request.query_params.get('payment_method_id'))
+
+        # Resolve tenant schema
+        tenant_schema = None
+        if hasattr(request, 'tenant') and request.tenant and getattr(request.tenant, 'schema_name', 'public') != 'public':
+            tenant_schema = request.tenant.schema_name
+        else:
+            tenant_schema = (
+                request.headers.get('X-Tenant-Schema')
+                or request.headers.get('X-Tenant')
+                or request.query_params.get('tenant')
+            )
+
+        try:
+            engine = HistoricalReceiptMigrationEngine(
+                file_obj=uploaded_file,
+                tenant_schema=tenant_schema,
+                user=request.user if request.user.is_authenticated else None,
+                dry_run=is_dry_run,
+                post_to_gl=post_to_gl,
+                auto_allocate=auto_allocate,
+                default_academic_year_id=academic_year_id,
+                default_term_id=term_id,
+                default_payment_method_id=payment_method_id,
+            )
+            result = engine.process()
+
+            if not result.get('success') and result.get('total_rows', 0) == 0:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response(result, status=status.HTTP_200_OK)
+
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {'error': f"Failed to process receipt migration: {str(exc)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='import_template')
+    def import_template(self, request):
+        """
+        Download standard sample CSV template for historical receipt imports.
+        GET /api/fees/receipts/import_template/
+        """
+        csv_content = HistoricalReceiptMigrationEngine.generate_template_csv()
+        response = HttpResponse(csv_content, content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="historical_receipts_template.csv"'
+        return response

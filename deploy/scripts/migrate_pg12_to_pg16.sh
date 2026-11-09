@@ -144,9 +144,9 @@ if [ "${TABLE_COUNT}" -eq 0 ]; then
 fi
 
 # Check tenant schema table if available
-if sudo -u postgres psql -p 5433 -d "${DB_NAME}" -c "\dt public_tenant" &>/dev/null; then
-    TENANT_COUNT=$(sudo -u postgres psql -p 5433 -d "${DB_NAME}" -t -c "SELECT count(*) FROM public_tenant;" | tr -d ' ')
-    log_info "Found ${TENANT_COUNT} tenant(s) registered in public_tenant."
+if sudo -u postgres psql -p 5433 -d "${DB_NAME}" -c "\dt tenants_client" &>/dev/null; then
+    TENANT_COUNT=$(sudo -u postgres psql -p 5433 -d "${DB_NAME}" -t -c "SELECT count(*) FROM tenants_client;" | tr -d ' ')
+    log_info "Found ${TENANT_COUNT} tenant(s) registered in tenants_client."
 fi
 
 # 9. Update .env with DB_PORT=5433

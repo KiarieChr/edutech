@@ -6,3 +6,4 @@ from .application_fee import ApplicationFeePayment
 from .interview import InterviewSchedule
 from .reporting import ReportingRecord
 from .profiles import Student, Parent, DepartmentHead, StudentManager, RELATION_SHIP
+from .transfer import StudentCampusTransfer

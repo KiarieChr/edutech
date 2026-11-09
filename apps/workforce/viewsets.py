@@ -86,6 +86,7 @@ class CampusSerializer(serializers.ModelSerializer):
     class Meta:
         model = Campus
         fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at', 'created_by', 'updated_by']
 
 
 class _LegacyCampusViewSet(viewsets.ModelViewSet):
@@ -97,6 +98,30 @@ class CampusViewSet(viewsets.ModelViewSet):
     queryset = Campus.objects.select_related('institution', 'campus_admin').all()
     serializer_class = CampusSerializer
     permission_classes = [AllowAny]
+
+    def perform_create(self, serializer):
+        user = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
+        institution = getattr(self.request, 'institution', None)
+        if not institution:
+            try:
+                from core.models import InstitutionProfile
+                institution = InstitutionProfile.get_instance()
+            except Exception:
+                institution = None
+        kwargs = {}
+        if user:
+            kwargs['created_by'] = user
+            kwargs['updated_by'] = user
+        if institution:
+            kwargs['institution'] = institution
+        serializer.save(**kwargs)
+
+    def perform_update(self, serializer):
+        user = self.request.user if getattr(self.request, 'user', None) and self.request.user.is_authenticated else None
+        kwargs = {}
+        if user:
+            kwargs['updated_by'] = user
+        serializer.save(**kwargs)
 
     def get_queryset(self):
         user = getattr(self.request, 'user', None)
